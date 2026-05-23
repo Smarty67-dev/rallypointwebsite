@@ -824,23 +824,10 @@ function renderBookingsPlaceholder() {
     <div class="bookings-demo-hint">
       <i class="fa-solid fa-circle-info"></i>
       <div>
-        <p><strong>Demo accounts with sample bookings:</strong></p>
-        <ul>
-          <li><button type="button" class="demo-email-btn" data-email="alice@example.com">alice@example.com</button> — password: <code>password</code></li>
-          <li><button type="button" class="demo-email-btn" data-email="yashaswin@rallypoint.org">yashaswin@rallypoint.org</button></li>
-          <li><button type="button" class="demo-email-btn" data-email="nikhilesh@rallypoint.org">nikhilesh@rallypoint.org</button></li>
-        </ul>
-        <p class="bookings-demo-hint-sub">Click an email above or search with the box, then press <strong>Search</strong>.</p>
+        <p>Enter your email in the box above and press <strong>Search</strong> to view bookings.</p>
       </div>
     </div>
   `;
-
-  elements.bookingsOutputContainer.querySelectorAll('.demo-email-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      elements.lookupEmail.value = btn.dataset.email;
-      searchBookings(btn.dataset.email);
-    });
-  });
 }
 
 function refreshMyBookingsView() {
