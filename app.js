@@ -110,6 +110,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (!hasFirestoreBackend()) {
+    showToast('Shared booking sync is not configured. This browser still uses local storage only. Device-to-device updates require Firebase setup in email-config.js.', 'warning');
     seedDatabase();
   }
 

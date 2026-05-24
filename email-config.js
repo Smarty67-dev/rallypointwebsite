@@ -19,5 +19,13 @@ window.RALLY_EMAIL_CONFIG = {
   emailjsServiceId: '',
   emailjsTemplateId: '',
   emailjsPublicKey: '',
+  firebaseConfig: {
+    apiKey: "AIzaSyBcFnPRebnLewLmbcEuoLDLsTWyjOqnj5M",
+    authDomain: "rally-po.firebaseapp.com",
+    projectId: "rally-po",
+    storageBucket: "rally-po.firebasestorage.app",
+    messagingSenderId: "369415952800",
+    appId: "1:369415952800:web:fad5153b972c892cd56cc5"
+  },
   resetBookingsOnLoad: true
 };
