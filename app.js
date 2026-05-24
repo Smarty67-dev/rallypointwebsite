@@ -380,7 +380,13 @@ function renderCalendar() {
     const isPast = tileDate < state.today;
     const isAfterBookingDeadline = tileDate > state.bookingDeadlineDate;
 
-    if (isCampDayOfWeek && isAfterCampStart && !isPast && !isAfterBookingDeadline) {
+    const bookings = getBookingsFromStorage();
+    const dateKey = getFormattedDateKey(tileDate);
+    const morningCount = bookings.filter(b => b.date === dateKey && b.session === 'morning').length;
+    const eveningCount = bookings.filter(b => b.date === dateKey && b.session === 'evening').length;
+    const isFullyBooked = morningCount >= state.maxSpots && eveningCount >= state.maxSpots;
+
+    if (isCampDayOfWeek && isAfterCampStart && !isPast && !isAfterBookingDeadline && !isFullyBooked) {
       dayTile.classList.add('camp-day');
       if (state.selectedDate && isSameDate(tileDate, state.selectedDate)) dayTile.classList.add('selected');
       if (isSameDate(tileDate, state.today)) dayTile.classList.add('today');
@@ -389,6 +395,10 @@ function renderCalendar() {
     } else {
       dayTile.classList.add('disabled');
       dayTile.setAttribute('disabled', 'true');
+      if (isFullyBooked) {
+        dayTile.classList.add('sold-out-day');
+        dayTile.title = 'Fully booked';
+      }
     }
     elements.calendarDays.appendChild(dayTile);
   }
@@ -776,10 +786,10 @@ async function submitBooking() {
     const notifyEmail = EMAIL_CONFIG.notifyEmail;
 
     if (emailResult.sent) {
-      showToast(`Booking confirmed! Receipt sent to ${notifyEmail}. ID: ${bookingId}`, "success");
+      showToast(`Booking confirmed! Receipt sent to ${notifyEmail} via ${emailResult.via}. ID: ${bookingId}`, "success");
     } else {
       showToast(
-        `Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} could not be sent. Open the site via a web server and activate FormSubmit on first use.`,
+        `Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} failed: ${emailResult.error}. Open the site via a web server and activate FormSubmit on first use.`,
         "warning"
       );
       console.error('[Booking Email]', emailResult.error);
@@ -793,6 +803,7 @@ async function submitBooking() {
     state.selectedSession = null;
 
     updateSessionSlotsCapacity(state.selectedDate);
+    renderCalendar();
     selectDate(state.selectedDate);
 
     if (elements.lookupEmail.value.trim().toLowerCase() === email) {
