@@ -572,11 +572,12 @@ async function initBookingBackend() {
 
     firestoreListenerUnsubscribe = bookingsRef.onSnapshot((snapshot) => {
       const localBookings = readLocalBookings();
+      const pendingLocalBookings = localBookings.filter((booking) => !booking.firestoreDocId);
       firestoreBookingsCache = snapshot.docs.map((doc) => ({
         ...doc.data(),
         firestoreDocId: doc.id
       }));
-      saveBookingsToStorage(mergeBookingsById(localBookings, firestoreBookingsCache));
+      saveBookingsToStorage(mergeBookingsById(pendingLocalBookings, firestoreBookingsCache));
       if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
       renderCalendar();
       if (state.currentUser) refreshMyBookingsView();
