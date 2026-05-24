@@ -1,14 +1,22 @@
 /**
  * Booking notification email settings.
  *
- * Primary: FormSubmit.co → rallypoint.hr@gmail.com
- * One-time setup: after the first real booking, check that inbox and click
- * FormSubmit's activation link so future alerts are delivered.
+ * Preferred: Web3Forms → rallypoint.hr@gmail.com
+ *   1. Sign up at https://web3forms.com
+ *   2. Create a form and copy the access key below.
  *
- * Optional backup: create a free key at https://web3forms.com (set recipient
- * to rallypoint.hr@gmail.com) and paste it below.
+ * Alternate: EmailJS → rallypoint.hr@gmail.com
+ *   1. Sign up at https://www.emailjs.com
+ *   2. Create a service, template, and public key.
+ *   3. Paste service/template/public key below.
+ *
+ * Fallback: FormSubmit.co → rallypoint.hr@gmail.com
+ *   This works only from a real web server and requires activation.
  */
 window.RALLY_EMAIL_CONFIG = {
   notifyEmail: 'rallypoint.hr@gmail.com',
-  web3formsAccessKey: ''
+  web3formsAccessKey: '680c3979-af76-499f-9bad-1103433f9726',
+  emailjsServiceId: '',
+  emailjsTemplateId: '',
+  emailjsPublicKey: ''
 };

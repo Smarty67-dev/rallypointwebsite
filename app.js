@@ -641,6 +641,7 @@ async function sendViaWeb3Forms(booking, payload) {
       subject: payload.subject,
       from_name: booking.name,
       email: booking.email,
+      to_email: EMAIL_CONFIG.notifyEmail,
       ...payload.fields,
       message: payload.message
     })
@@ -654,9 +655,53 @@ async function sendViaWeb3Forms(booking, payload) {
   return 'Web3Forms';
 }
 
+async function sendViaEmailJS(booking, payload) {
+  const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey } = EMAIL_CONFIG;
+  if (!emailjsServiceId || !emailjsTemplateId || !emailjsPublicKey) return null;
+  if (!window.emailjs || typeof window.emailjs.send !== 'function') {
+    throw new Error('EmailJS SDK is not loaded.');
+  }
+
+  const templateParams = {
+    to_email: EMAIL_CONFIG.notifyEmail,
+    subject: payload.subject,
+    message: payload.message,
+    ...payload.fields,
+    from_name: booking.name,
+    reply_to: booking.email
+  };
+
+  const result = await window.emailjs.send(emailjsServiceId, emailjsTemplateId, templateParams, emailjsPublicKey);
+  if (!result || result.status !== 200) {
+    throw new Error(result.text || 'EmailJS could not deliver the notification.');
+  }
+
+  return 'EmailJS';
+}
+
 async function dispatchBookingEmailAlert(booking) {
   const payload = buildBookingEmailPayload(booking);
   const errors = [];
+
+  if (EMAIL_CONFIG.web3formsAccessKey) {
+    try {
+      const via = await sendViaWeb3Forms(booking, payload);
+      return { sent: true, via };
+    } catch (err) {
+      errors.push(err.message || String(err));
+      console.warn('[Booking Email] Web3Forms failed:', err);
+    }
+  }
+
+  if (EMAIL_CONFIG.emailjsServiceId && EMAIL_CONFIG.emailjsTemplateId && EMAIL_CONFIG.emailjsPublicKey) {
+    try {
+      const via = await sendViaEmailJS(booking, payload);
+      return { sent: true, via };
+    } catch (err) {
+      errors.push(err.message || String(err));
+      console.warn('[Booking Email] EmailJS failed:', err);
+    }
+  }
 
   try {
     const via = await sendViaFormSubmit(booking, payload);
@@ -664,14 +709,6 @@ async function dispatchBookingEmailAlert(booking) {
   } catch (err) {
     errors.push(err.message || String(err));
     console.warn('[Booking Email] FormSubmit failed:', err);
-  }
-
-  try {
-    const via = await sendViaWeb3Forms(booking, payload);
-    if (via) return { sent: true, via };
-  } catch (err) {
-    errors.push(err.message || String(err));
-    console.warn('[Booking Email] Web3Forms failed:', err);
   }
 
   return { sent: false, error: errors.join(' ') };
