@@ -509,7 +509,7 @@ function updateSessionSlotsCapacity(date) {
 }
 
 // --- BOOKING SUBMISSION & EMAIL DISPATCH ---
-const EMAIL_CONFIG = window.RALLY_EMAIL_CONFIG || { notifyEmail: 'summertennis.hr@gmail.com', web3formsAccessKey: '' };
+const EMAIL_CONFIG = window.RALLY_EMAIL_CONFIG || { notifyEmail: 'rallypoint.hr@gmail.com', web3formsAccessKey: '' };
 
 function initBookingForm() {
   elements.bookingForm.addEventListener('submit', async (e) => {
@@ -776,10 +776,10 @@ async function submitBooking() {
     const notifyEmail = EMAIL_CONFIG.notifyEmail;
 
     if (emailResult.sent) {
-      showToast(`Booking confirmed! Notification sent to ${notifyEmail}. ID: ${bookingId}`, "success");
+      showToast(`Booking confirmed! Receipt sent to ${notifyEmail}. ID: ${bookingId}`, "success");
     } else {
       showToast(
-        `Booking saved (ID: ${bookingId}), but the email to ${notifyEmail} could not be sent. Open the site via a web server and activate FormSubmit on first use.`,
+        `Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} could not be sent. Open the site via a web server and activate FormSubmit on first use.`,
         "warning"
       );
       console.error('[Booking Email]', emailResult.error);
@@ -866,11 +866,6 @@ function searchBookings(email) {
     const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const sessionTime = booking.session === 'morning' ? "7:00 AM - 8:30 AM" : "5:30 PM - 7:00 PM";
     const sessionName = booking.session === 'morning' ? "Morning Rise & Rally" : "Evening Sunset Smash";
-    
-    // Construct pre-filled mailto receiver url
-    const emailSubject = encodeURIComponent(`RallyPoint Non-Profit Registration - ${booking.id}`);
-    const emailBody = encodeURIComponent(`Hi Coaches Yashaswin & Nikhilesh,\n\nWe have a new non-profit summer camp registration secured!\n\nBooking ID: ${booking.id}\nPlayer: ${booking.name}\nEmail: ${booking.email}\nPhone: ${booking.phone}\nSkill Level: ${booking.skill}\nAge Group: ${booking.age}\nDate: ${formattedDate}\nSession: ${sessionName} (${sessionTime})\n\nThis initiative operates strictly as a non-profit community program.`);
-    const mailtoUrl = `mailto:summertennis.hr@gmail.com?subject=${emailSubject}&body=${emailBody}`;
 
     const ticket = document.createElement('div');
     ticket.className = 'ticket';
@@ -901,7 +896,6 @@ function searchBookings(email) {
       </div>
       <div class="ticket-divider"></div>
       <div class="ticket-side">
-        <a href="${mailtoUrl}" class="btn" style="width: 100%; padding: 0.5rem 0.8rem; font-size: 0.75rem; background-color: var(--primary-deep); color: var(--accent-volt); border-radius: 50px; font-weight: 700; margin-bottom: 0.5rem; text-align: center;"><i class="fa-solid fa-paper-plane"></i> Mail Receipt</a>
         <button class="btn-cancel" onclick="triggerCancellation('${booking.id}', '${booking.email}')">Cancel Booking</button>
       </div>
     `;
