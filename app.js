@@ -533,6 +533,7 @@ function updateSessionSlotsCapacity(date) {
 
 // --- BOOKING SUBMISSION & EMAIL DISPATCH ---
 const EMAIL_CONFIG = window.RALLY_EMAIL_CONFIG || { notifyEmail: 'rallypoint.hr@gmail.com', web3formsAccessKey: '' };
+const EMAIL_REQUEST_TIMEOUT_MS = 8000;
 const FIREBASE_BACKEND_CONFIG = (window.RALLY_EMAIL_CONFIG && window.RALLY_EMAIL_CONFIG.firebaseConfig) || null;
 let firestoreDb = null;
 let firestoreBookingsCache = [];
@@ -650,6 +651,18 @@ async function saveBookingToBackend(booking) {
   return docRef.id;
 }
 
+async function deleteBookingFromBackend(booking) {
+  if (!hasFirestoreBackend() || !firestoreDb || !booking) return;
+
+  if (booking.firestoreDocId) {
+    await firestoreDb.collection('bookings').doc(booking.firestoreDocId).delete();
+    return;
+  }
+
+  const snapshot = await firestoreDb.collection('bookings').where('id', '==', booking.id).get();
+  await Promise.all(snapshot.docs.map((doc) => doc.ref.delete()));
+}
+
 function initBookingForm() {
   elements.bookingForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -727,7 +740,7 @@ async function sendViaFormSubmit(booking, payload) {
   const notifyEmail = EMAIL_CONFIG.notifyEmail;
   const endpoint = `https://formsubmit.co/ajax/${encodeURIComponent(notifyEmail)}`;
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -758,11 +771,64 @@ async function sendViaFormSubmit(booking, payload) {
   return 'FormSubmit';
 }
 
+async function sendViaFormspree(booking, payload) {
+  const endpoint = EMAIL_CONFIG.formspreeEndpoint;
+  if (!endpoint) return null;
+
+  const response = await fetchWithTimeout(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify({
+      subject: payload.subject,
+      name: booking.name,
+      email: booking.email,
+      phone: booking.phone,
+      ...payload.fields,
+      message: payload.message
+    })
+  });
+
+  let result = {};
+  try {
+    result = await response.json();
+  } catch {
+    result = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(result.error || result.message || 'Formspree could not deliver the notification.');
+  }
+
+  return 'Formspree';
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = EMAIL_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Notification service timed out.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function sendViaWeb3Forms(booking, payload) {
   const accessKey = EMAIL_CONFIG.web3formsAccessKey;
   if (!accessKey) return null;
 
-  const response = await fetch('https://api.web3forms.com/submit', {
+  const response = await fetchWithTimeout('https://api.web3forms.com/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
@@ -811,6 +877,16 @@ async function sendViaEmailJS(booking, payload) {
 async function dispatchBookingEmailAlert(booking) {
   const payload = buildBookingEmailPayload(booking);
   const errors = [];
+
+  if (EMAIL_CONFIG.formspreeEndpoint) {
+    try {
+      const via = await sendViaFormspree(booking, payload);
+      return { sent: true, via };
+    } catch (err) {
+      errors.push(err.message || String(err));
+      console.warn('[Booking Email] Formspree failed:', err);
+    }
+  }
 
   if (EMAIL_CONFIG.web3formsAccessKey) {
     try {
@@ -942,35 +1018,39 @@ async function submitBooking() {
   const submitBtn = elements.btnSubmitBooking;
   const originalBtnText = submitBtn.textContent;
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Sending notification...';
+  submitBtn.textContent = 'Confirming booking...';
   
   try {
+    bookings.push(newBooking);
+    saveBookingsToStorage(bookings);
+
     if (hasFirestoreBackend()) {
-      try {
-        await saveBookingToBackend(newBooking);
-      } catch (backendErr) {
+      saveBookingToBackend(newBooking).catch((backendErr) => {
         console.warn('[Firestore] saveBookingToBackend failed:', backendErr);
-        bookings.push(newBooking);
-        saveBookingsToStorage(bookings);
-        showToast('Booking is saved locally, but the shared backend failed. It may not appear for other users yet.', 'warning');
-      }
-    } else {
-      bookings.push(newBooking);
-      saveBookingsToStorage(bookings);
+        showToast('Booking is confirmed locally, but shared booking sync is delayed.', 'warning');
+      });
     }
 
-    const emailResult = await dispatchBookingEmailAlert(newBooking);
     const notifyEmail = EMAIL_CONFIG.notifyEmail;
+    showToast(`Booking confirmed! Notification is being sent to ${notifyEmail}. ID: ${bookingId}`, "success");
 
-    if (emailResult.sent) {
-      showToast(`Booking confirmed! Receipt sent to ${notifyEmail} via ${emailResult.via}. ID: ${bookingId}`, "success");
-    } else {
-      showToast(
-        `Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} failed: ${emailResult.error}. Open the site via a web server and activate FormSubmit on first use.`,
-        "warning"
-      );
-      console.error('[Booking Email]', emailResult.error);
-    }
+    dispatchBookingEmailAlert(newBooking)
+      .then((emailResult) => {
+        if (emailResult.sent) {
+          showToast(`Receipt sent to ${notifyEmail} via ${emailResult.via}.`, "success");
+        } else {
+          showToast(
+            `Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} failed: ${emailResult.error}.`,
+            "warning"
+          );
+          console.error('[Booking Email]', emailResult.error);
+        }
+      })
+      .catch((err) => {
+        const message = err.message || String(err);
+        showToast(`Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} failed: ${message}.`, "warning");
+        console.error('[Booking Email]', err);
+      });
 
     elements.bookerSkill.selectedIndex = 0;
     elements.bookerAge.selectedIndex = 0;
@@ -1100,6 +1180,7 @@ window.triggerCancellation = function(bookingId, email) {
 function cancelBooking(bookingId, email) {
   let bookings = getBookingsFromStorage();
   const initialLen = bookings.length;
+  const bookingToCancel = bookings.find(b => b.id === bookingId);
   
   bookings = bookings.filter(b => b.id !== bookingId);
   saveBookingsToStorage(bookings);
@@ -1111,6 +1192,11 @@ function cancelBooking(bookingId, email) {
     if (state.selectedDate) {
       updateSessionSlotsCapacity(state.selectedDate);
     }
+
+    deleteBookingFromBackend(bookingToCancel).catch((err) => {
+      console.warn('[Firestore] deleteBookingFromBackend failed:', err);
+      showToast('Booking was cancelled here, but shared sync could not remove it yet. Try again after refreshing.', 'warning');
+    });
   } else {
     showToast("Cancellation failed.", "error");
   }

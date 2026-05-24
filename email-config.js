@@ -15,6 +15,7 @@
  */
 window.RALLY_EMAIL_CONFIG = {
   notifyEmail: 'rallypoint.hr@gmail.com',
+  formspreeEndpoint: 'https://formspree.io/f/mojbnlvn',
   web3formsAccessKey: '680c3979-af76-499f-9bad-1103433f9726',
   emailjsServiceId: '',
   emailjsTemplateId: '',
