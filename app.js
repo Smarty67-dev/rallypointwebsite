@@ -100,6 +100,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await initBookingBackend();
 
+  const shouldReset = window.RALLY_EMAIL_CONFIG?.resetBookingsOnLoad && !(await hasBookingResetBeenApplied());
+  if (shouldReset) {
+    const resetSuccess = await resetAllBookings();
+    if (resetSuccess) {
+      await markBookingResetAsApplied();
+      showToast('All camp spots were reset once. Future page loads will keep availability stable.', 'success');
+    }
+  }
+
   if (!hasFirestoreBackend()) {
     seedDatabase();
   }
@@ -576,6 +585,58 @@ async function initBookingBackend() {
     console.error('[Firestore] initBookingBackend failed:', err);
     showToast('Unable to connect to shared booking backend. Using local storage.', 'warning');
   }
+}
+
+async function hasBookingResetBeenApplied() {
+  if (hasFirestoreBackend() && firestoreDb) {
+    try {
+      const metaDoc = await firestoreDb.collection('metadata').doc('bookingReset').get();
+      return metaDoc.exists && metaDoc.data()?.done === true;
+    } catch (err) {
+      console.warn('[Firestore] hasBookingResetBeenApplied failed:', err);
+    }
+  }
+
+  return localStorage.getItem('rally_point_booking_reset_done') === 'true';
+}
+
+async function markBookingResetAsApplied() {
+  if (hasFirestoreBackend() && firestoreDb) {
+    try {
+      await firestoreDb.collection('metadata').doc('bookingReset').set({ done: true, timestamp: new Date().toISOString() });
+      return;
+    } catch (err) {
+      console.warn('[Firestore] markBookingResetAsApplied failed:', err);
+    }
+  }
+
+  localStorage.setItem('rally_point_booking_reset_done', 'true');
+}
+
+async function resetAllBookings() {
+  let success = true;
+
+  try {
+    if (hasFirestoreBackend() && firestoreDb) {
+      const bookingsRef = firestoreDb.collection('bookings');
+      const snapshot = await bookingsRef.get();
+      const deletePromises = snapshot.docs.map(doc => doc.ref.delete());
+      await Promise.all(deletePromises);
+      firestoreBookingsCache = [];
+    }
+  } catch (err) {
+    console.error('[Firestore] resetAllBookings failed:', err);
+    showToast('Could not reset shared booking backend. Local spots will still be cleared.', 'warning');
+    success = false;
+  }
+
+  localStorage.removeItem('rally_point_bookings');
+  firestoreBookingsCache = [];
+  saveBookingsToStorage([]);
+  if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
+  renderCalendar();
+
+  return success;
 }
 
 async function saveBookingToBackend(booking) {
