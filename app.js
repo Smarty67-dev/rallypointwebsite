@@ -571,11 +571,12 @@ async function initBookingBackend() {
     const bookingsRef = firestoreDb.collection('bookings');
 
     firestoreListenerUnsubscribe = bookingsRef.onSnapshot((snapshot) => {
+      const localBookings = readLocalBookings();
       firestoreBookingsCache = snapshot.docs.map((doc) => ({
         ...doc.data(),
         firestoreDocId: doc.id
       }));
-      saveBookingsToStorage(firestoreBookingsCache);
+      saveBookingsToStorage(mergeBookingsById(localBookings, firestoreBookingsCache));
       if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
       renderCalendar();
       if (state.currentUser) refreshMyBookingsView();
@@ -646,8 +647,9 @@ async function saveBookingToBackend(booking) {
 
   const bookingsRef = firestoreDb.collection('bookings');
   const docRef = await bookingsRef.add(booking);
-  firestoreBookingsCache.push({ ...booking, firestoreDocId: docRef.id });
-  saveBookingsToStorage(firestoreBookingsCache);
+  const savedBooking = { ...booking, firestoreDocId: docRef.id };
+  firestoreBookingsCache = mergeBookingsById(firestoreBookingsCache, [savedBooking]);
+  saveBookingsToStorage(mergeBookingsById(readLocalBookings(), firestoreBookingsCache));
   return docRef.id;
 }
 
@@ -722,6 +724,53 @@ function buildBookingEmailPayload(booking) {
     sessionProgram,
     message,
     fields: {
+      'Booking ID': booking.id,
+      'Full Name': booking.name,
+      'Email Address': booking.email,
+      'Phone Number': booking.phone,
+      'Skill Level': booking.skill,
+      'Age Category': booking.age,
+      'Session Date': sessionDate,
+      'Session Time': sessionTime,
+      'Program': sessionProgram,
+      'Booking Summary': `${sessionProgram} on ${sessionDate} at ${sessionTime}`
+    }
+  };
+}
+
+function buildCancellationEmailPayload(booking) {
+  const sessionDate = formatBookingDateLabel(booking.date);
+  const sessionTime = formatBookingSessionTime(booking.session);
+  const sessionProgram = formatBookingSessionProgram(booking.session);
+
+  const message = [
+    'A RallyPoint booking was cancelled.',
+    '',
+    `Booking ID: ${booking.id}`,
+    `Full Name: ${booking.name}`,
+    `Email Address: ${booking.email}`,
+    `Phone Number: ${booking.phone}`,
+    `Skill Level: ${booking.skill}`,
+    `Age Category: ${booking.age}`,
+    `Session Date: ${sessionDate}`,
+    `Session Time: ${sessionTime}`,
+    `Program: ${sessionProgram}`,
+    '',
+    'The slot has been released back to the schedule.',
+    '',
+    'RallyPoint automated cancellation notification'
+  ].join('\n');
+
+  const subject = `Cancelled Booking: ${booking.name} - ${sessionDate} (${sessionTime})`;
+
+  return {
+    subject,
+    sessionDate,
+    sessionTime,
+    sessionProgram,
+    message,
+    fields: {
+      'Notification Type': 'Cancellation',
       'Booking ID': booking.id,
       'Full Name': booking.name,
       'Email Address': booking.email,
@@ -875,7 +924,14 @@ async function sendViaEmailJS(booking, payload) {
 }
 
 async function dispatchBookingEmailAlert(booking) {
-  const payload = buildBookingEmailPayload(booking);
+  return dispatchNotification(booking, buildBookingEmailPayload(booking));
+}
+
+async function dispatchBookingCancellationAlert(booking) {
+  return dispatchNotification(booking, buildCancellationEmailPayload(booking));
+}
+
+async function dispatchNotification(booking, payload) {
   const errors = [];
 
   if (EMAIL_CONFIG.formspreeEndpoint) {
@@ -1183,6 +1239,7 @@ function cancelBooking(bookingId, email) {
   const bookingToCancel = bookings.find(b => b.id === bookingId);
   
   bookings = bookings.filter(b => b.id !== bookingId);
+  firestoreBookingsCache = firestoreBookingsCache.filter(b => b.id !== bookingId);
   saveBookingsToStorage(bookings);
   
   if (bookings.length < initialLen) {
@@ -1197,6 +1254,23 @@ function cancelBooking(bookingId, email) {
       console.warn('[Firestore] deleteBookingFromBackend failed:', err);
       showToast('Booking was cancelled here, but shared sync could not remove it yet. Try again after refreshing.', 'warning');
     });
+
+    if (bookingToCancel) {
+      dispatchBookingCancellationAlert(bookingToCancel)
+        .then((emailResult) => {
+          if (emailResult.sent) {
+            showToast(`Cancellation email sent via ${emailResult.via}.`, "success");
+          } else {
+            showToast(`Booking cancelled, but the cancellation email failed: ${emailResult.error}.`, "warning");
+            console.error('[Cancellation Email]', emailResult.error);
+          }
+        })
+        .catch((err) => {
+          const message = err.message || String(err);
+          showToast(`Booking cancelled, but the cancellation email failed: ${message}.`, "warning");
+          console.error('[Cancellation Email]', err);
+        });
+    }
   } else {
     showToast("Cancellation failed.", "error");
   }
@@ -1250,11 +1324,7 @@ function saveUsersToStorage(users) {
   localStorage.setItem('rally_users', JSON.stringify(users));
 }
 
-function getBookingsFromStorage() {
-  if (hasFirestoreBackend() && firestoreBookingsCache.length > 0) {
-    return firestoreBookingsCache;
-  }
-
+function readLocalBookings() {
   try {
     const bookings = localStorage.getItem('rally_point_bookings');
     return bookings ? JSON.parse(bookings) : [];
@@ -1262,6 +1332,26 @@ function getBookingsFromStorage() {
     localStorage.removeItem('rally_point_bookings');
     return [];
   }
+}
+
+function mergeBookingsById(...bookingLists) {
+  const merged = new Map();
+
+  bookingLists.flat().forEach((booking) => {
+    if (!booking || !booking.id) return;
+    const existing = merged.get(booking.id);
+    merged.set(booking.id, {
+      ...existing,
+      ...booking,
+      firestoreDocId: booking.firestoreDocId || existing?.firestoreDocId
+    });
+  });
+
+  return Array.from(merged.values());
+}
+
+function getBookingsFromStorage() {
+  return mergeBookingsById(readLocalBookings(), firestoreBookingsCache);
 }
 
 function saveBookingsToStorage(bookings) {
