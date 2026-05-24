@@ -90,17 +90,20 @@ const elements = {
 };
 
 // --- INITIALIZATION ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initNavigation();
   initAuth();
   initCalendar();
   initSessionCards();
   initBookingForm();
   initLookup();
-  
-  // Seed sample data
-  seedDatabase();
-  
+
+  await initBookingBackend();
+
+  if (!hasFirestoreBackend()) {
+    seedDatabase();
+  }
+
   // Check active session (loads bookings if already logged in)
   checkSession();
 
@@ -520,6 +523,70 @@ function updateSessionSlotsCapacity(date) {
 
 // --- BOOKING SUBMISSION & EMAIL DISPATCH ---
 const EMAIL_CONFIG = window.RALLY_EMAIL_CONFIG || { notifyEmail: 'rallypoint.hr@gmail.com', web3formsAccessKey: '' };
+const FIREBASE_BACKEND_CONFIG = (window.RALLY_EMAIL_CONFIG && window.RALLY_EMAIL_CONFIG.firebaseConfig) || null;
+let firestoreDb = null;
+let firestoreBookingsCache = [];
+let firestoreListenerUnsubscribe = null;
+
+function hasFirestoreBackend() {
+  return FIREBASE_BACKEND_CONFIG && FIREBASE_BACKEND_CONFIG.projectId;
+}
+
+function initFirebaseBackend() {
+  if (!hasFirestoreBackend()) return false;
+  if (!window.firebase || !window.firebase.firestore) {
+    console.warn('[Firestore] Firebase SDK not available.');
+    return false;
+  }
+
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_BACKEND_CONFIG);
+    }
+    firestoreDb = firebase.firestore();
+    return true;
+  } catch (err) {
+    console.error('[Firestore] init failed:', err);
+    return false;
+  }
+}
+
+async function initBookingBackend() {
+  if (!initFirebaseBackend()) {
+    return;
+  }
+
+  try {
+    const bookingsRef = firestoreDb.collection('bookings');
+
+    firestoreListenerUnsubscribe = bookingsRef.onSnapshot((snapshot) => {
+      firestoreBookingsCache = snapshot.docs.map((doc) => ({
+        ...doc.data(),
+        firestoreDocId: doc.id
+      }));
+      saveBookingsToStorage(firestoreBookingsCache);
+      if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
+      renderCalendar();
+      if (state.currentUser) refreshMyBookingsView();
+    }, (err) => {
+      console.error('[Firestore] booking listener failed:', err);
+      showToast('Shared booking backend connection error. Showing cached data.', 'warning');
+    });
+  } catch (err) {
+    console.error('[Firestore] initBookingBackend failed:', err);
+    showToast('Unable to connect to shared booking backend. Using local storage.', 'warning');
+  }
+}
+
+async function saveBookingToBackend(booking) {
+  if (!hasFirestoreBackend() || !firestoreDb) return null;
+
+  const bookingsRef = firestoreDb.collection('bookings');
+  const docRef = await bookingsRef.add(booking);
+  firestoreBookingsCache.push({ ...booking, firestoreDocId: docRef.id });
+  saveBookingsToStorage(firestoreBookingsCache);
+  return docRef.id;
+}
 
 function initBookingForm() {
   elements.bookingForm.addEventListener('submit', async (e) => {
@@ -816,8 +883,19 @@ async function submitBooking() {
   submitBtn.textContent = 'Sending notification...';
   
   try {
-    bookings.push(newBooking);
-    saveBookingsToStorage(bookings);
+    if (hasFirestoreBackend()) {
+      try {
+        await saveBookingToBackend(newBooking);
+      } catch (backendErr) {
+        console.warn('[Firestore] saveBookingToBackend failed:', backendErr);
+        bookings.push(newBooking);
+        saveBookingsToStorage(bookings);
+        showToast('Booking is saved locally, but the shared backend failed. It may not appear for other users yet.', 'warning');
+      }
+    } else {
+      bookings.push(newBooking);
+      saveBookingsToStorage(bookings);
+    }
 
     const emailResult = await dispatchBookingEmailAlert(newBooking);
     const notifyEmail = EMAIL_CONFIG.notifyEmail;
@@ -1025,6 +1103,10 @@ function saveUsersToStorage(users) {
 }
 
 function getBookingsFromStorage() {
+  if (hasFirestoreBackend() && firestoreBookingsCache.length > 0) {
+    return firestoreBookingsCache;
+  }
+
   try {
     const bookings = localStorage.getItem('rally_point_bookings');
     return bookings ? JSON.parse(bookings) : [];
