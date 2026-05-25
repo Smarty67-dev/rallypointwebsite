@@ -462,6 +462,35 @@
     </div>
   </section>
 
+  <!-- Hidden Admin Roster Route -->
+  <section class="admin-route" id="admin" aria-hidden="true">
+    <div class="admin-container">
+      <div class="admin-card">
+        <div class="admin-header">
+          <span class="admin-kicker">Director Access</span>
+          <h3>Session Roster</h3>
+          <p>Live signup roster with player skill-level breakdowns.</p>
+        </div>
+
+        <div class="admin-access-panel" id="admin-access-panel">
+          <!-- Protected access state renders here -->
+        </div>
+
+        <div class="admin-dashboard" id="admin-dashboard" style="display: none;">
+          <div class="admin-summary-grid" id="admin-summary-grid"></div>
+          <div class="admin-skill-panel">
+            <div>
+              <h4>Skill Breakdown</h4>
+              <p id="admin-skill-total">0 total players</p>
+            </div>
+            <div class="admin-skill-bars" id="admin-skill-bars"></div>
+          </div>
+          <div class="admin-roster-list" id="admin-roster-list"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Footer -->
   <footer>
     <div class="footer-container">

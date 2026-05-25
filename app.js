@@ -37,6 +37,8 @@ const state = {
   users: []
 };
 
+const ADMIN_EMAILS = ['yashaswin@rallypoint.org', 'nikhilesh@rallypoint.org'];
+
 // --- DOM ELEMENTS ---
 const elements = {
   header: document.getElementById('main-header'),
@@ -68,6 +70,13 @@ const elements = {
   lookupEmail: document.getElementById('lookup-email'),
   btnLookupSearch: document.getElementById('btn-lookup-search'),
   bookingsOutputContainer: document.getElementById('bookings-output-container'),
+  adminRoute: document.getElementById('admin'),
+  adminAccessPanel: document.getElementById('admin-access-panel'),
+  adminDashboard: document.getElementById('admin-dashboard'),
+  adminSummaryGrid: document.getElementById('admin-summary-grid'),
+  adminSkillTotal: document.getElementById('admin-skill-total'),
+  adminSkillBars: document.getElementById('admin-skill-bars'),
+  adminRosterList: document.getElementById('admin-roster-list'),
   toastContainer: document.getElementById('toast-container'),
   
   // Auth Elements
@@ -97,6 +106,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSessionCards();
   initBookingForm();
   initLookup();
+  initAdminRoute();
 
   await initBookingBackend();
 
@@ -113,6 +123,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Shared booking sync is not configured. This browser still uses local storage only. Device-to-device updates require Firebase setup in email-config.js.', 'warning');
     seedDatabase();
   }
+
+  ensureDirectorAccounts();
 
   // Check active session (loads bookings if already logged in)
   checkSession();
@@ -163,6 +175,19 @@ function initNavigation() {
       setMobileMenuOpen(false);
     }
   });
+}
+
+function initAdminRoute() {
+  window.addEventListener('hashchange', renderAdminRoute);
+  renderAdminRoute();
+}
+
+function isAdminRouteActive() {
+  return window.location.hash.toLowerCase() === '#admin';
+}
+
+function isDirectorUser(user = state.currentUser) {
+  return Boolean(user && ADMIN_EMAILS.includes(user.email));
 }
 
 // --- USER AUTHENTICATION ENGINE ---
@@ -273,6 +298,7 @@ function setCurrentUserSession(user) {
   localStorage.setItem('rally_current_user', JSON.stringify(user));
   updateAuthUI();
   refreshMyBookingsView();
+  renderAdminRoute();
 }
 
 function handleLogout() {
@@ -281,6 +307,7 @@ function handleLogout() {
   showToast("Logged out successfully.", "info");
   updateAuthUI();
   renderBookingsPlaceholder();
+  renderAdminRoute();
 }
 
 function checkSession() {
@@ -295,6 +322,7 @@ function checkSession() {
   }
   updateAuthUI();
   refreshMyBookingsView();
+  renderAdminRoute();
 }
 
 function updateAuthUI() {
@@ -581,6 +609,7 @@ async function initBookingBackend() {
       if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
       renderCalendar();
       if (state.currentUser) refreshMyBookingsView();
+      renderAdminRoute();
     }, (err) => {
       console.error('[Firestore] booking listener failed:', err);
       showToast('Shared booking backend connection error. Showing cached data.', 'warning');
@@ -1119,6 +1148,7 @@ async function submitBooking() {
     updateSessionSlotsCapacity(state.selectedDate);
     renderCalendar();
     selectDate(state.selectedDate);
+    renderAdminRoute();
 
     if (elements.lookupEmail.value.trim().toLowerCase() === email) {
       searchBookings(email);
@@ -1127,6 +1157,213 @@ async function submitBooking() {
     submitBtn.disabled = false;
     submitBtn.textContent = originalBtnText;
   }
+}
+
+// --- HIDDEN ADMIN ROSTER ROUTE ---
+function renderAdminRoute() {
+  if (!elements.adminRoute) return;
+
+  const active = isAdminRouteActive();
+  elements.adminRoute.style.display = active ? 'block' : 'none';
+  elements.adminRoute.setAttribute('aria-hidden', active ? 'false' : 'true');
+
+  if (!active) return;
+
+  if (!state.currentUser) {
+    elements.adminDashboard.style.display = 'none';
+    elements.adminAccessPanel.style.display = 'block';
+    elements.adminAccessPanel.innerHTML = `
+      <div class="admin-lock">
+        <i class="fa-solid fa-lock"></i>
+        <div>
+          <h4>Director login required</h4>
+          <p>Log in with a director account to view the session roster.</p>
+        </div>
+        <button class="btn btn-volt" id="btn-admin-login">Log In</button>
+      </div>
+    `;
+    document.getElementById('btn-admin-login').addEventListener('click', () => openAuthModal('login'));
+    return;
+  }
+
+  if (!isDirectorUser()) {
+    elements.adminDashboard.style.display = 'none';
+    elements.adminAccessPanel.style.display = 'block';
+    elements.adminAccessPanel.innerHTML = `
+      <div class="admin-lock">
+        <i class="fa-solid fa-shield-halved"></i>
+        <div>
+          <h4>Director access only</h4>
+          <p>The roster is available to Yashaswin and Nikhilesh director accounts only.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const bookings = getBookingsFromStorage().filter(isActiveRosterBooking).sort((a, b) => {
+    const dateCompare = new Date(a.date) - new Date(b.date);
+    if (dateCompare !== 0) return dateCompare;
+    if (a.session !== b.session) return a.session === 'morning' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  elements.adminAccessPanel.style.display = 'none';
+  elements.adminDashboard.style.display = 'grid';
+  renderAdminSummary(bookings);
+  renderAdminSkillBreakdown(bookings);
+  renderAdminRoster(bookings);
+}
+
+function isActiveRosterBooking(booking) {
+  return normalizeDate(new Date(`${booking.date}T00:00:00`)) >= state.today;
+}
+
+function renderAdminSummary(bookings) {
+  const uniqueDates = new Set(bookings.map((booking) => booking.date)).size;
+  const morningCount = bookings.filter((booking) => booking.session === 'morning').length;
+  const eveningCount = bookings.filter((booking) => booking.session === 'evening').length;
+
+  elements.adminSummaryGrid.innerHTML = [
+    buildAdminMetricCard('Total Players', bookings.length, 'fa-users'),
+    buildAdminMetricCard('Session Dates', uniqueDates, 'fa-calendar-days'),
+    buildAdminMetricCard('Morning Signups', morningCount, 'fa-sun'),
+    buildAdminMetricCard('Evening Signups', eveningCount, 'fa-moon')
+  ].join('');
+}
+
+function buildAdminMetricCard(label, value, iconClass) {
+  return `
+    <div class="admin-metric">
+      <span><i class="fa-solid ${iconClass}"></i></span>
+      <div>
+        <strong>${value}</strong>
+        <p>${label}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminSkillBreakdown(bookings) {
+  const counts = bookings.reduce((acc, booking) => {
+    const skill = booking.skill || 'Unspecified';
+    acc[skill] = (acc[skill] || 0) + 1;
+    return acc;
+  }, {});
+
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  elements.adminSkillTotal.textContent = `${bookings.length} total ${bookings.length === 1 ? 'player' : 'players'}`;
+
+  if (entries.length === 0) {
+    elements.adminSkillBars.innerHTML = '<p class="admin-empty-text">No skill data yet.</p>';
+    return;
+  }
+
+  elements.adminSkillBars.innerHTML = entries.map(([skill, count]) => {
+    const percent = bookings.length ? Math.round((count / bookings.length) * 100) : 0;
+    return `
+      <div class="admin-skill-row">
+        <div class="admin-skill-label">
+          <span>${escapeHTML(skill)}</span>
+          <strong>${count} (${percent}%)</strong>
+        </div>
+        <div class="admin-skill-track">
+          <span style="width: ${percent}%"></span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderAdminRoster(bookings) {
+  if (bookings.length === 0) {
+    elements.adminRosterList.innerHTML = `
+      <div class="admin-empty">
+        <i class="fa-solid fa-clipboard-list"></i>
+        <p>No active session signups yet.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const grouped = bookings.reduce((acc, booking) => {
+    const key = `${booking.date}|${booking.session}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(booking);
+    return acc;
+  }, {});
+
+  elements.adminRosterList.innerHTML = Object.entries(grouped).map(([key, sessionBookings]) => {
+    const [date, session] = key.split('|');
+    const spotsLeft = Math.max(state.maxSpots - sessionBookings.length, 0);
+    const skillSummary = summarizeSkills(sessionBookings);
+
+    return `
+      <section class="admin-session">
+        <div class="admin-session-header">
+          <div>
+            <span>${formatBookingDateLabel(date)}</span>
+            <h4>${formatBookingSessionProgram(session)}</h4>
+            <p>${formatBookingSessionTime(session)} | ${sessionBookings.length}/${state.maxSpots} booked | ${spotsLeft} open</p>
+          </div>
+          <div class="admin-session-skills">${escapeHTML(skillSummary)}</div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Skill</th>
+                <th>Age</th>
+                <th>Booking ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sessionBookings.map(renderAdminRosterRow).join('')}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }).join('');
+}
+
+function renderAdminRosterRow(booking) {
+  return `
+    <tr>
+      <td>${escapeHTML(booking.name)}</td>
+      <td>${escapeHTML(booking.email)}</td>
+      <td>${escapeHTML(booking.phone)}</td>
+      <td>${escapeHTML(booking.skill)}</td>
+      <td>${escapeHTML(booking.age)}</td>
+      <td>${escapeHTML(booking.id)}</td>
+    </tr>
+  `;
+}
+
+function summarizeSkills(bookings) {
+  const counts = bookings.reduce((acc, booking) => {
+    const skill = booking.skill || 'Unspecified';
+    acc[skill] = (acc[skill] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([skill, count]) => `${skill}: ${count}`)
+    .join(' | ');
+}
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
 }
 
 // --- BOOKINGS LOOKUP & MAIL CLIENT RECEIPT GENERATOR ---
@@ -1250,6 +1487,7 @@ function cancelBooking(bookingId, email) {
     if (state.selectedDate) {
       updateSessionSlotsCapacity(state.selectedDate);
     }
+    renderAdminRoute();
 
     deleteBookingFromBackend(bookingToCancel).catch((err) => {
       console.warn('[Firestore] deleteBookingFromBackend failed:', err);
@@ -1357,6 +1595,27 @@ function getBookingsFromStorage() {
 
 function saveBookingsToStorage(bookings) {
   localStorage.setItem('rally_point_bookings', JSON.stringify(bookings));
+}
+
+function ensureDirectorAccounts() {
+  const directorUsers = [
+    { name: "Yashaswin Ruttala", email: "yashaswin@rallypoint.org", phone: "555-111-2222", password: "prodirector" },
+    { name: "Nikhilesh Meela", email: "nikhilesh@rallypoint.org", phone: "555-333-4444", password: "prodirector" }
+  ];
+
+  const users = getUsersFromStorage();
+  let changed = false;
+
+  directorUsers.forEach((directorUser) => {
+    if (!users.some((user) => user.email === directorUser.email)) {
+      users.push(directorUser);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveUsersToStorage(users);
+  }
 }
 
 function seedDatabase() {
