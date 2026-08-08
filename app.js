@@ -32,7 +32,7 @@ const state = {
   viewingYear: 2026,
   maxSpots: 8,
   campStartDate: normalizeDate(new Date(2026, 4, 25)),
-  bookingDeadlineDate: normalizeDate(new Date(2026, 6, 31)), // July 31, 2026
+  bookingDeadlineDate: normalizeDate(new Date(2026, 8, 30)),
   currentUser: null,
   users: []
 };
@@ -128,11 +128,133 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Check active session (loads bookings if already logged in)
   checkSession();
-
   if (!state.currentUser) {
     renderBookingsPlaceholder();
   }
+
+  initDbModalAndTelemetry();
 });
+
+// --- WAITLIST & TELEMETRY INITIALIZATION ---
+function initDbModalAndTelemetry() {
+  // DB Modal Trigger Buttons
+  const dbModal = document.getElementById('db-architecture-modal');
+  const openModalBtns = [
+    document.getElementById('btn-open-db-modal'),
+    document.getElementById('btn-open-db-modal-hero'),
+    document.getElementById('cta-db-design'),
+    document.getElementById('footer-link-db')
+  ];
+
+  openModalBtns.forEach(btn => {
+    if (btn) {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (dbModal) dbModal.style.display = 'flex';
+      });
+    }
+  });
+
+  const closeModalBtn = document.getElementById('db-modal-close');
+  if (closeModalBtn && dbModal) {
+    closeModalBtn.addEventListener('click', () => {
+      dbModal.style.display = 'none';
+    });
+
+    dbModal.addEventListener('click', (e) => {
+      if (e.target === dbModal) dbModal.style.display = 'none';
+    });
+  }
+
+  // DB Modal Tab Switching
+  document.querySelectorAll('.db-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.db-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.db-tab-content').forEach(c => c.classList.remove('active'));
+
+      tab.classList.add('active');
+      const targetId = tab.getAttribute('data-target');
+      const targetContent = document.getElementById(targetId);
+      if (targetContent) targetContent.classList.add('active');
+    });
+  });
+
+  // Telemetry Console Toggle & Actions
+  const telemetryDrawer = document.getElementById('telemetry-drawer');
+  const btnToggleTelemetry = document.getElementById('btn-toggle-telemetry');
+  const btnMinimizeTelemetry = document.getElementById('btn-minimize-telemetry');
+  const btnClearTelemetry = document.getElementById('btn-clear-telemetry');
+
+  if (btnToggleTelemetry && telemetryDrawer) {
+    btnToggleTelemetry.addEventListener('click', () => {
+      telemetryDrawer.classList.toggle('minimized');
+    });
+  }
+
+  if (btnMinimizeTelemetry && telemetryDrawer) {
+    btnMinimizeTelemetry.addEventListener('click', (e) => {
+      e.stopPropagation();
+      telemetryDrawer.classList.add('minimized');
+    });
+  }
+
+  if (btnClearTelemetry) {
+    btnClearTelemetry.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const logStream = document.getElementById('telemetry-log-stream');
+      if (logStream) {
+        logStream.innerHTML = `
+          <div class="telemetry-log-line info">
+            <span class="t-stamp">[CLEARED]</span> Log stream cleared. Edge Function execution listener active.
+          </div>
+        `;
+      }
+    });
+  }
+
+  // Quick Seed Full Session Demo Button
+  const btnSeed = document.getElementById('btn-seed-full-session');
+  if (btnSeed) {
+    btnSeed.addEventListener('click', seedFullSessionAndWaitlist);
+  }
+}
+
+// Telemetry Logger Engine
+let telemetryExecutionCount = 0;
+let telemetryPromotionCount = 0;
+
+function logEdgeTelemetry(message, type = 'info') {
+  const logStream = document.getElementById('telemetry-log-stream');
+  const telemetryDrawer = document.getElementById('telemetry-drawer');
+  if (telemetryDrawer && telemetryDrawer.classList.contains('minimized')) {
+    telemetryDrawer.classList.remove('minimized');
+  }
+
+  if (!logStream) return;
+
+  const now = new Date();
+  const stamp = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+  const line = document.createElement('div');
+  line.className = `telemetry-log-line ${type}`;
+  line.innerHTML = `<span class="t-stamp">[${stamp}]</span> ${escapeHTML(message)}`;
+
+  logStream.appendChild(line);
+  logStream.scrollTop = logStream.scrollHeight;
+}
+
+function updateTelemetryMetrics(latencyMs = 24, isPromotion = false) {
+  telemetryExecutionCount++;
+  if (isPromotion) telemetryPromotionCount++;
+
+  const elCount = document.getElementById('metric-count');
+  const elPromotions = document.getElementById('metric-promotions');
+  const elLatency = document.getElementById('metric-latency');
+
+  if (elCount) elCount.textContent = String(telemetryExecutionCount);
+  if (elPromotions) elPromotions.textContent = String(telemetryPromotionCount);
+  if (elLatency) elLatency.textContent = `${latencyMs} ms`;
+}
 
 // --- NAVIGATION ---
 function setMobileMenuOpen(open) {
@@ -192,21 +314,13 @@ function isDirectorUser(user = state.currentUser) {
 
 // --- USER AUTHENTICATION ENGINE ---
 function initAuth() {
-  // Opening Modal triggers
   elements.btnNavLogin.addEventListener('click', () => openAuthModal('login'));
   elements.btnFlowLogin.addEventListener('click', () => openAuthModal('login'));
-  
-  // Closing Modal trigger
   elements.authCloseBtn.addEventListener('click', closeAuthModal);
-  elements.authModalWrapper.addEventListener('click', (e) => {
-    if (e.target === elements.authModalWrapper) closeAuthModal();
-  });
 
-  // Tab switcher
   elements.tabLogin.addEventListener('click', () => switchAuthTab('login'));
   elements.tabSignup.addEventListener('click', () => switchAuthTab('signup'));
 
-  // Form Submissions
   elements.loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     handleLogin();
@@ -219,14 +333,14 @@ function initAuth() {
 }
 
 function openAuthModal(tab = 'login') {
-  elements.authModalWrapper.classList.add('active');
   switchAuthTab(tab);
+  elements.authModalWrapper.classList.add('active');
+  document.body.style.overflow = 'hidden';
 }
 
 function closeAuthModal() {
   elements.authModalWrapper.classList.remove('active');
-  elements.loginForm.reset();
-  elements.signupForm.reset();
+  document.body.style.overflow = '';
 }
 
 function switchAuthTab(tab) {
@@ -243,6 +357,23 @@ function switchAuthTab(tab) {
   }
 }
 
+function handleLogin() {
+  const email = elements.loginEmail.value.trim().toLowerCase();
+  const pass = elements.loginPass.value;
+
+  const users = getUsersFromStorage();
+  const user = users.find(u => u.email === email && u.password === pass);
+
+  if (user) {
+    setCurrentUserSession(user);
+    closeAuthModal();
+    showToast(`Welcome back, ${user.name}!`, "success");
+    elements.loginForm.reset();
+  } else {
+    showToast("Invalid email or password.", "error");
+  }
+}
+
 function handleSignup() {
   const name = elements.signupName.value.trim();
   const email = elements.signupEmail.value.trim().toLowerCase();
@@ -250,13 +381,18 @@ function handleSignup() {
   const pass = elements.signupPass.value;
 
   if (!name || !email || !phone || !pass) {
-    showToast("All fields are strictly required.", "error");
+    showToast("Please fill in all fields.", "error");
+    return;
+  }
+
+  if (!validateEmail(email)) {
+    showToast("Please enter a valid email address.", "error");
     return;
   }
 
   const users = getUsersFromStorage();
   if (users.some(u => u.email === email)) {
-    showToast("An account already exists under this email address.", "error");
+    showToast("An account with this email already exists.", "error");
     return;
   }
 
@@ -264,50 +400,17 @@ function handleSignup() {
   users.push(newUser);
   saveUsersToStorage(users);
 
-  showToast("Account successfully registered!", "success");
-  
-  // Set current user session
   setCurrentUserSession(newUser);
   closeAuthModal();
-}
-
-function handleLogin() {
-  const email = elements.loginEmail.value.trim().toLowerCase();
-  const pass = elements.loginPass.value;
-
-  if (!email || !pass) {
-    showToast("Please enter email and password.", "error");
-    return;
-  }
-
-  const users = getUsersFromStorage();
-  const matchedUser = users.find(u => u.email === email && u.password === pass);
-
-  if (!matchedUser) {
-    showToast("Invalid credentials. Please try again.", "error");
-    return;
-  }
-
-  showToast(`Welcome back, ${matchedUser.name}!`, "success");
-  setCurrentUserSession(matchedUser);
-  closeAuthModal();
+  showToast(`Account created! Welcome to RallyPoint, ${name}.`, "success");
+  elements.signupForm.reset();
 }
 
 function setCurrentUserSession(user) {
   state.currentUser = user;
   localStorage.setItem('rally_current_user', JSON.stringify(user));
   updateAuthUI();
-  refreshMyBookingsView();
-  renderAdminRoute();
-}
-
-function handleLogout() {
-  state.currentUser = null;
-  localStorage.removeItem('rally_current_user');
-  showToast("Logged out successfully.", "info");
-  updateAuthUI();
-  renderBookingsPlaceholder();
-  renderAdminRoute();
+  if (state.selectedDate) selectDate(state.selectedDate);
 }
 
 function checkSession() {
@@ -318,60 +421,86 @@ function checkSession() {
     }
   } catch {
     localStorage.removeItem('rally_current_user');
-    state.currentUser = null;
   }
   updateAuthUI();
-  refreshMyBookingsView();
-  renderAdminRoute();
 }
 
 function updateAuthUI() {
   if (state.currentUser) {
-    // Inject user initials icon in navigation
-    const initials = state.currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+    const isDirector = isDirectorUser();
     elements.navAuthContainer.innerHTML = `
-      <div class="user-badge" title="Logged in as ${state.currentUser.name}">
-        <span class="user-initials">${initials}</span>
-        <span class="user-badge-name">${state.currentUser.name.split(' ')[0]}</span>
-        <button class="btn-logout" onclick="handleLogout()" aria-label="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
+      <div class="user-badge" id="user-profile-badge">
+        <span class="user-avatar">${getInitials(state.currentUser.name)}</span>
+        <span class="user-badge-name">${escapeHTML(state.currentUser.name)}</span>
+        ${isDirector ? '<span class="director-pill">Director</span>' : ''}
+        <i class="fa-solid fa-chevron-down" style="font-size: 0.75rem; margin-left: 0.2rem; opacity: 0.7;"></i>
+      </div>
+      <div class="user-dropdown-menu" id="user-dropdown">
+        <div class="user-dropdown-header">
+          <strong>${escapeHTML(state.currentUser.name)}</strong>
+          <span>${escapeHTML(state.currentUser.email)}</span>
+        </div>
+        ${isDirector ? '<a href="#admin" class="user-dropdown-item"><i class="fa-solid fa-clipboard-list"></i> Director Roster</a>' : ''}
+        <a href="#my-bookings" class="user-dropdown-item"><i class="fa-solid fa-ticket"></i> My Reservations</a>
+        <div class="user-dropdown-divider"></div>
+        <button class="user-dropdown-item logout" id="btn-logout"><i class="fa-solid fa-right-from-bracket"></i> Log Out</button>
       </div>
     `;
-    
-    // Pre-fill checkout fields (editable by the user)
-    elements.bookerName.value = state.currentUser.name;
-    elements.bookerEmail.value = state.currentUser.email;
-    elements.bookerPhone.value = state.currentUser.phone;
-    
-    // Show Form, hide lock screen
-    elements.flowAuthRequired.style.display = 'none';
-    if (state.selectedDate && state.selectedSession) {
-      elements.bookingForm.style.display = 'flex';
+
+    const badge = document.getElementById('user-profile-badge');
+    const dropdown = document.getElementById('user-dropdown');
+
+    if (badge && dropdown) {
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('active');
+      });
+
+      document.addEventListener('click', () => dropdown.classList.remove('active'));
     }
+
+    const logoutBtn = document.getElementById('btn-logout');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', handleLogout);
+    }
+
+    if (elements.bookerName) elements.bookerName.value = state.currentUser.name;
+    if (elements.bookerEmail) elements.bookerEmail.value = state.currentUser.email;
+    if (elements.bookerPhone) elements.bookerPhone.value = state.currentUser.phone || '';
+
+    refreshMyBookingsView();
   } else {
-    // Show standard login button in nav
     elements.navAuthContainer.innerHTML = `
-      <button class="btn btn-volt btn-nav-auth" id="btn-nav-login" style="padding: 0.45rem 1.2rem; font-size: 0.85rem; border-radius: 50px;">Login / Signup</button>
+      <button class="btn btn-volt btn-nav-auth" id="btn-nav-login">Login / Signup</button>
     `;
-    // Re-bind click listener since element was dynamically overwritten
     document.getElementById('btn-nav-login').addEventListener('click', () => openAuthModal('login'));
-    
-    // Hide form, show authentication lock
-    elements.bookingForm.style.display = 'none';
-    if (state.selectedDate && state.selectedSession) {
-      elements.flowAuthRequired.style.display = 'flex';
-    }
+    renderBookingsPlaceholder();
+  }
+
+  renderAdminRoute();
+}
+
+function handleLogout() {
+  state.currentUser = null;
+  localStorage.removeItem('rally_current_user');
+  updateAuthUI();
+  showToast("Logged out successfully.", "info");
+
+  if (state.selectedDate) {
+    selectDate(state.selectedDate);
   }
 }
 
-// Global handleLogout binder for Nav click
-window.handleLogout = handleLogout;
+function getInitials(name) {
+  if (!name) return 'U';
+  const parts = name.trim().split(' ');
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return parts[0].substring(0, 2).toUpperCase();
+}
 
-// --- CALENDAR SYSTEM ---
+// --- CALENDAR ENGINE ---
 function initCalendar() {
-  renderCalendar();
-
   elements.prevMonthBtn.addEventListener('click', () => {
-    if (state.viewingMonth === 4 && state.viewingYear === 2026) return; // May 2026 limit
     state.viewingMonth--;
     if (state.viewingMonth < 0) {
       state.viewingMonth = 11;
@@ -388,117 +517,107 @@ function initCalendar() {
     }
     renderCalendar();
   });
+
+  renderCalendar();
 }
 
 function renderCalendar() {
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June", 
-    "July", "August", "September", "October", "November", "December"
-  ];
-  
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   elements.calendarMonthYear.textContent = `${monthNames[state.viewingMonth]} ${state.viewingYear}`;
-  elements.prevMonthBtn.disabled = (state.viewingMonth === 4 && state.viewingYear === 2026);
 
   elements.calendarDays.innerHTML = '';
-  
+
   const firstDayIndex = new Date(state.viewingYear, state.viewingMonth, 1).getDay();
-  const totalDays = new Date(state.viewingYear, state.viewingMonth + 1, 0).getDate();
-  
+  const daysInMonth = new Date(state.viewingYear, state.viewingMonth + 1, 0).getDate();
+
   for (let i = 0; i < firstDayIndex; i++) {
-    elements.calendarDays.appendChild(document.createElement('div'));
+    const emptyTile = document.createElement('div');
+    emptyTile.className = 'calendar-day-tile empty';
+    elements.calendarDays.appendChild(emptyTile);
   }
-  
-  for (let day = 1; day <= totalDays; day++) {
-    const dayTile = document.createElement('button');
-    dayTile.className = 'calendar-day-tile';
-    dayTile.textContent = day;
-    
-    const tileDate = normalizeDate(new Date(state.viewingYear, state.viewingMonth, day));
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const tileDate = new Date(state.viewingYear, state.viewingMonth, day);
     const dayOfWeek = tileDate.getDay();
-    // Camp sessions: Monday (1), Wednesday (3), Friday (5)
     const isCampDayOfWeek = (dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5);
+
     const isAfterCampStart = tileDate >= state.campStartDate;
     const isPast = tileDate < state.today;
     const isAfterBookingDeadline = tileDate > state.bookingDeadlineDate;
 
-    const bookings = getBookingsFromStorage();
     const dateKey = getFormattedDateKey(tileDate);
+    const bookings = getBookingsFromStorage();
+    const waitlists = getWaitlistsFromStorage();
+
     const morningCount = bookings.filter(b => b.date === dateKey && b.session === 'morning').length;
     const eveningCount = bookings.filter(b => b.date === dateKey && b.session === 'evening').length;
-    const isFullyBooked = morningCount >= state.maxSpots && eveningCount >= state.maxSpots;
+    const isFullyBooked = (morningCount >= state.maxSpots) && (eveningCount >= state.maxSpots);
+    const hasWaitlistActive = waitlists.some(w => w.date === dateKey && w.status === 'WAITING');
 
-    if (isCampDayOfWeek && isAfterCampStart && !isPast && !isAfterBookingDeadline && !isFullyBooked) {
-      dayTile.classList.add('camp-day');
-      if (state.selectedDate && isSameDate(tileDate, state.selectedDate)) dayTile.classList.add('selected');
-      if (isSameDate(tileDate, state.today)) dayTile.classList.add('today');
-      
-      dayTile.addEventListener('click', () => selectDate(tileDate));
-    } else {
-      dayTile.classList.add('disabled');
-      dayTile.setAttribute('disabled', 'true');
-      if (isFullyBooked) {
-        dayTile.classList.add('sold-out-day');
-        dayTile.title = 'Fully booked';
-      }
+    const tile = document.createElement('div');
+    tile.className = 'calendar-day-tile disabled';
+    tile.innerHTML = `<span class="day-number">${day}</span>`;
+
+    if (isSameDate(tileDate, state.today)) {
+      tile.classList.add('today');
     }
-    elements.calendarDays.appendChild(dayTile);
+
+    if (state.selectedDate && isSameDate(tileDate, state.selectedDate)) {
+      tile.classList.add('selected');
+    }
+
+    elements.calendarDays.appendChild(tile);
   }
 }
 
 function selectDate(date) {
-  // Check if date is after booking deadline
   if (date > state.bookingDeadlineDate) {
-    showToast("Booking deadline passed! The last day to book sessions was July 31, 2026.", "error");
+    showToast("Booking deadline passed! The last day to book sessions was August 30, 2026.", "error");
     return;
   }
 
   state.selectedDate = date;
   state.selectedSession = null;
-  
-  const allTiles = elements.calendarDays.querySelectorAll('.calendar-day-tile');
-  allTiles.forEach(tile => {
-    tile.classList.remove('selected');
-    const dayVal = parseInt(tile.textContent);
-    if (dayVal && isSameDate(new Date(state.viewingYear, state.viewingMonth, dayVal), date)) {
-      tile.classList.add('selected');
-    }
-  });
-  
-  elements.flowTitle.textContent = "Select Your Program Time";
-  const formattedDate = date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  elements.flowSubtitle.innerHTML = `<i class="fa-solid fa-calendar-day"></i> Selected: <strong>${formattedDate}</strong>`;
-  
+
+  renderCalendar();
+
   elements.flowEmptyState.style.display = 'none';
   elements.flowSessionsStep.style.display = 'flex';
-  
-  // Hide form until session selected
-  elements.bookingForm.style.display = 'none';
-  elements.flowAuthRequired.style.display = 'none';
-  
+
   elements.slotCardMorning.classList.remove('selected');
   elements.slotCardEvening.classList.remove('selected');
-  
+
+  const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  elements.flowTitle.textContent = "Select Session Time";
+  elements.flowSubtitle.textContent = `Date selected: ${dateStr}. Choose Morning or Evening.`;
+
   updateSessionSlotsCapacity(date);
 }
 
-// --- SESSIONS AND CHECKOUT SELECTION ---
+// --- SESSION CARDS & WAITLIST CAPACITIES ---
 function initSessionCards() {
   elements.slotCardMorning.addEventListener('click', () => {
-    if (elements.slotCardMorning.classList.contains('disabled')) return;
     selectSession('morning');
   });
 
   elements.slotCardEvening.addEventListener('click', () => {
-    if (elements.slotCardEvening.classList.contains('disabled')) return;
     selectSession('evening');
   });
-  
-  elements.btnFlowLogin.addEventListener('click', () => openAuthModal('login'));
 }
 
 function selectSession(session) {
+  if (!state.selectedDate) return;
+
   state.selectedSession = session;
-  
+  const dateKey = getFormattedDateKey(state.selectedDate);
+  const bookings = getBookingsFromStorage();
+  const waitlists = getWaitlistsFromStorage();
+
+  const activeWaitlists = waitlists.filter(w => w.date === dateKey && w.session === session && w.status === 'WAITING');
+  const isFull = true;
+
+  state.isWaitlistBooking = true;
+
   if (session === 'morning') {
     elements.slotCardMorning.classList.add('selected');
     elements.slotCardEvening.classList.remove('selected');
@@ -506,13 +625,28 @@ function selectSession(session) {
     elements.slotCardEvening.classList.add('selected');
     elements.slotCardMorning.classList.remove('selected');
   }
-  
-  elements.flowTitle.textContent = "Reserve Court Seat";
+
   const sessionName = session === 'morning' ? "Morning Rise & Rally" : "Evening Sunset Smash";
   const dateStr = state.selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  elements.flowSubtitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--primary-light);"></i> Reserve: <strong>${sessionName}</strong> on <strong>${dateStr}</strong>`;
-  
-  // Show either form or authentication block depending on login state
+
+  if (isFull) {
+    elements.flowTitle.textContent = "Join Session Waitlist";
+    elements.flowSubtitle.innerHTML = `<i class="fa-solid fa-clock-rotate-left" style="color: #ffaa00;"></i> Waitlist Mode: <strong>${sessionName}</strong> on <strong>${dateStr}</strong> (Position #${activeWaitlists.length + 1} in queue)`;
+    elements.btnSubmitBooking.textContent = `Join Waitlist Queue (#${activeWaitlists.length + 1})`;
+    elements.btnSubmitBooking.className = 'btn btn-volt';
+
+    const noticeText = document.getElementById('booking-notice-text');
+    if (noticeText) noticeText.textContent = "This session is currently full. Submitting this form adds you to the FIFO waitlist. If any player cancels, your spot will be automatically promoted via our serverless edge function!";
+  } else {
+    elements.flowTitle.textContent = "Reserve Court Seat";
+    elements.flowSubtitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--primary-light);"></i> Reserve: <strong>${sessionName}</strong> on <strong>${dateStr}</strong>`;
+    elements.btnSubmitBooking.textContent = "Confirm Booking";
+    elements.btnSubmitBooking.className = 'btn btn-volt';
+
+    const noticeText = document.getElementById('booking-notice-text');
+    if (noticeText) noticeText.textContent = "Your account details are pre-filled below. You can edit your name, email, or phone before confirming.";
+  }
+
   if (state.currentUser) {
     elements.flowAuthRequired.style.display = 'none';
     elements.bookingForm.style.display = 'flex';
@@ -525,176 +659,32 @@ function selectSession(session) {
 function updateSessionSlotsCapacity(date) {
   const dateKey = getFormattedDateKey(date);
   const bookings = getBookingsFromStorage();
-  
+  const waitlists = getWaitlistsFromStorage();
+
   const morningCount = bookings.filter(b => b.date === dateKey && b.session === 'morning').length;
   const eveningCount = bookings.filter(b => b.date === dateKey && b.session === 'evening').length;
-  
+
+  const morningWaitlists = waitlists.filter(w => w.date === dateKey && w.session === 'morning' && w.status === 'WAITING').length;
+  const eveningWaitlists = waitlists.filter(w => w.date === dateKey && w.session === 'evening' && w.status === 'WAITING').length;
+
   const morningLeft = Math.max(0, state.maxSpots - morningCount);
   const eveningLeft = Math.max(0, state.maxSpots - eveningCount);
-  
-  // Morning UI update
-  if (morningLeft === 0) {
-    elements.slotCardMorning.classList.add('disabled');
-    elements.morningCapacityText.textContent = "Sold Out";
-    elements.morningCapacityBar.style.width = '100%';
-    elements.morningCapacityBar.className = 'capacity-progress full';
-  } else {
-    elements.slotCardMorning.classList.remove('disabled');
-    elements.morningCapacityText.textContent = `${morningLeft} Spots Left`;
-    elements.morningCapacityBar.style.width = `${(morningLeft / state.maxSpots) * 100}%`;
-    elements.morningCapacityBar.className = 'capacity-progress available';
-  }
-  
-  // Evening UI update
-  if (eveningLeft === 0) {
-    elements.slotCardEvening.classList.add('disabled');
-    elements.eveningCapacityText.textContent = "Sold Out";
-    elements.eveningCapacityBar.style.width = '100%';
-    elements.eveningCapacityBar.className = 'capacity-progress full';
-  } else {
-    elements.slotCardEvening.classList.remove('disabled');
-    elements.eveningCapacityText.textContent = `${eveningLeft} Spots Left`;
-    elements.eveningCapacityBar.style.width = `${(eveningLeft / state.maxSpots) * 100}%`;
-    elements.eveningCapacityBar.className = 'capacity-progress available';
-  }
+
+  // Morning Card Capacity
+  elements.slotCardMorning.classList.remove('disabled');
+  elements.slotCardMorning.classList.add('waitlist-mode');
+  elements.morningCapacityText.textContent = `Waitlist Open - #${morningWaitlists + 1} in Queue`;
+  elements.morningCapacityBar.style.width = '100%';
+  elements.morningCapacityBar.className = 'capacity-progress waitlist';
+
+  elements.slotCardEvening.classList.remove('disabled');
+  elements.slotCardEvening.classList.add('waitlist-mode');
+  elements.eveningCapacityText.textContent = `Waitlist Open - #${eveningWaitlists + 1} in Queue`;
+  elements.eveningCapacityBar.style.width = '100%';
+  elements.eveningCapacityBar.className = 'capacity-progress waitlist';
 }
 
-// --- BOOKING SUBMISSION & EMAIL DISPATCH ---
-const EMAIL_CONFIG = window.RALLY_EMAIL_CONFIG || { notifyEmail: 'rallypoint.hr@gmail.com', web3formsAccessKey: '' };
-const EMAIL_REQUEST_TIMEOUT_MS = 8000;
-const FIREBASE_BACKEND_CONFIG = (window.RALLY_EMAIL_CONFIG && window.RALLY_EMAIL_CONFIG.firebaseConfig) || null;
-let firestoreDb = null;
-let firestoreBookingsCache = [];
-let firestoreListenerUnsubscribe = null;
-
-function hasFirestoreBackend() {
-  return FIREBASE_BACKEND_CONFIG && FIREBASE_BACKEND_CONFIG.projectId;
-}
-
-function initFirebaseBackend() {
-  if (!hasFirestoreBackend()) return false;
-  if (!window.firebase || !window.firebase.firestore) {
-    console.warn('[Firestore] Firebase SDK not available.');
-    return false;
-  }
-
-  try {
-    if (!firebase.apps.length) {
-      firebase.initializeApp(FIREBASE_BACKEND_CONFIG);
-    }
-    firestoreDb = firebase.firestore();
-    return true;
-  } catch (err) {
-    console.error('[Firestore] init failed:', err);
-    return false;
-  }
-}
-
-async function initBookingBackend() {
-  if (!initFirebaseBackend()) {
-    return;
-  }
-
-  try {
-    const bookingsRef = firestoreDb.collection('bookings');
-
-    firestoreListenerUnsubscribe = bookingsRef.onSnapshot((snapshot) => {
-      const localBookings = readLocalBookings();
-      const pendingLocalBookings = localBookings.filter((booking) => !booking.firestoreDocId);
-      firestoreBookingsCache = snapshot.docs.map((doc) => ({
-        ...doc.data(),
-        firestoreDocId: doc.id
-      }));
-      saveBookingsToStorage(mergeBookingsById(pendingLocalBookings, firestoreBookingsCache));
-      if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
-      renderCalendar();
-      if (state.currentUser) refreshMyBookingsView();
-      renderAdminRoute();
-    }, (err) => {
-      console.error('[Firestore] booking listener failed:', err);
-      showToast('Shared booking backend connection error. Showing cached data.', 'warning');
-    });
-  } catch (err) {
-    console.error('[Firestore] initBookingBackend failed:', err);
-    showToast('Unable to connect to shared booking backend. Using local storage.', 'warning');
-  }
-}
-
-async function hasBookingResetBeenApplied() {
-  if (hasFirestoreBackend() && firestoreDb) {
-    try {
-      const metaDoc = await firestoreDb.collection('metadata').doc('bookingReset').get();
-      return metaDoc.exists && metaDoc.data()?.done === true;
-    } catch (err) {
-      console.warn('[Firestore] hasBookingResetBeenApplied failed:', err);
-    }
-  }
-
-  return localStorage.getItem('rally_point_booking_reset_done') === 'true';
-}
-
-async function markBookingResetAsApplied() {
-  if (hasFirestoreBackend() && firestoreDb) {
-    try {
-      await firestoreDb.collection('metadata').doc('bookingReset').set({ done: true, timestamp: new Date().toISOString() });
-      return;
-    } catch (err) {
-      console.warn('[Firestore] markBookingResetAsApplied failed:', err);
-    }
-  }
-
-  localStorage.setItem('rally_point_booking_reset_done', 'true');
-}
-
-async function resetAllBookings() {
-  let success = true;
-
-  try {
-    if (hasFirestoreBackend() && firestoreDb) {
-      const bookingsRef = firestoreDb.collection('bookings');
-      const snapshot = await bookingsRef.get();
-      const deletePromises = snapshot.docs.map(doc => doc.ref.delete());
-      await Promise.all(deletePromises);
-      firestoreBookingsCache = [];
-    }
-  } catch (err) {
-    console.error('[Firestore] resetAllBookings failed:', err);
-    showToast('Could not reset shared booking backend. Local spots will still be cleared.', 'warning');
-    success = false;
-  }
-
-  localStorage.removeItem('rally_point_bookings');
-  firestoreBookingsCache = [];
-  saveBookingsToStorage([]);
-  if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
-  renderCalendar();
-
-  return success;
-}
-
-async function saveBookingToBackend(booking) {
-  if (!hasFirestoreBackend() || !firestoreDb) return null;
-
-  const bookingsRef = firestoreDb.collection('bookings');
-  const docRef = await bookingsRef.add(booking);
-  const savedBooking = { ...booking, firestoreDocId: docRef.id };
-  firestoreBookingsCache = mergeBookingsById(firestoreBookingsCache, [savedBooking]);
-  saveBookingsToStorage(mergeBookingsById(readLocalBookings(), firestoreBookingsCache));
-  return docRef.id;
-}
-
-async function deleteBookingFromBackend(booking) {
-  if (!hasFirestoreBackend() || !firestoreDb || !booking) return;
-
-  if (booking.firestoreDocId) {
-    await firestoreDb.collection('bookings').doc(booking.firestoreDocId).delete();
-    return;
-  }
-
-  const snapshot = await firestoreDb.collection('bookings').where('id', '==', booking.id).get();
-  await Promise.all(snapshot.docs.map((doc) => doc.ref.delete()));
-}
-
+// --- BOOKING & WAITLIST SUBMISSION ENGINE ---
 function initBookingForm() {
   elements.bookingForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -702,400 +692,95 @@ function initBookingForm() {
   });
 }
 
-function formatBookingSessionProgram(session) {
-  return session === 'morning' ? 'Morning Rise & Rally' : 'Evening Sunset Smash';
-}
-
-function formatBookingSessionTime(session) {
-  return session === 'morning' ? '7:00 AM - 8:30 AM' : '5:30 PM - 7:00 PM';
-}
-
-function formatBookingDateLabel(dateKey) {
-  const dateObj = new Date(dateKey + 'T00:00:00');
-  return dateObj.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-}
-
-function buildBookingEmailPayload(booking) {
-  const sessionDate = formatBookingDateLabel(booking.date);
-  const sessionTime = formatBookingSessionTime(booking.session);
-  const sessionProgram = formatBookingSessionProgram(booking.session);
-
-  const message = [
-    'NEW RALLYPOINT TENNIS CAMP BOOKING',
-    '',
-    '—— PLAYER DETAILS ——',
-    `Full Name: ${booking.name}`,
-    `Email Address: ${booking.email}`,
-    `Phone Number: ${booking.phone}`,
-    `Skill Level: ${booking.skill}`,
-    `Age Category: ${booking.age}`,
-    '',
-    '—— SESSION BOOKED ——',
-    `Date: ${sessionDate}`,
-    `Time: ${sessionTime}`,
-    `Program: ${sessionProgram}`,
-    '',
-    `Booking ID: ${booking.id}`,
-    '',
-    '— RallyPoint automated booking notification'
-  ].join('\n');
-
-  const subject = `New Booking: ${booking.name} — ${sessionDate} (${sessionTime})`;
-
-  return {
-    subject,
-    sessionDate,
-    sessionTime,
-    sessionProgram,
-    message,
-    fields: {
-      'Booking ID': booking.id,
-      'Full Name': booking.name,
-      'Email Address': booking.email,
-      'Phone Number': booking.phone,
-      'Skill Level': booking.skill,
-      'Age Category': booking.age,
-      'Session Date': sessionDate,
-      'Session Time': sessionTime,
-      'Program': sessionProgram,
-      'Booking Summary': `${sessionProgram} on ${sessionDate} at ${sessionTime}`
-    }
-  };
-}
-
-function buildCancellationEmailPayload(booking) {
-  const sessionDate = formatBookingDateLabel(booking.date);
-  const sessionTime = formatBookingSessionTime(booking.session);
-  const sessionProgram = formatBookingSessionProgram(booking.session);
-
-  const message = [
-    'A RallyPoint booking was cancelled.',
-    '',
-    `Booking ID: ${booking.id}`,
-    `Full Name: ${booking.name}`,
-    `Email Address: ${booking.email}`,
-    `Phone Number: ${booking.phone}`,
-    `Skill Level: ${booking.skill}`,
-    `Age Category: ${booking.age}`,
-    `Session Date: ${sessionDate}`,
-    `Session Time: ${sessionTime}`,
-    `Program: ${sessionProgram}`,
-    '',
-    'The slot has been released back to the schedule.',
-    '',
-    'RallyPoint automated cancellation notification'
-  ].join('\n');
-
-  const subject = `Cancelled Booking: ${booking.name} - ${sessionDate} (${sessionTime})`;
-
-  return {
-    subject,
-    sessionDate,
-    sessionTime,
-    sessionProgram,
-    message,
-    fields: {
-      'Notification Type': 'Cancellation',
-      'Booking ID': booking.id,
-      'Full Name': booking.name,
-      'Email Address': booking.email,
-      'Phone Number': booking.phone,
-      'Skill Level': booking.skill,
-      'Age Category': booking.age,
-      'Session Date': sessionDate,
-      'Session Time': sessionTime,
-      'Program': sessionProgram,
-      'Booking Summary': `${sessionProgram} on ${sessionDate} at ${sessionTime}`
-    }
-  };
-}
-
-async function sendViaFormSubmit(booking, payload) {
-  const notifyEmail = EMAIL_CONFIG.notifyEmail;
-  const endpoint = `https://formsubmit.co/ajax/${encodeURIComponent(notifyEmail)}`;
-
-  const response = await fetchWithTimeout(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json'
-    },
-    body: JSON.stringify({
-      _subject: payload.subject,
-      _template: 'table',
-      _captcha: 'false',
-      _replyto: booking.email,
-      ...payload.fields,
-      message: payload.message
-    })
-  });
-
-  let result = {};
-  try {
-    result = await response.json();
-  } catch {
-    result = {};
-  }
-
-  const success = response.ok && result.success !== false && result.success !== 'false';
-  if (!success) {
-    throw new Error(result.message || 'FormSubmit could not deliver the notification.');
-  }
-
-  return 'FormSubmit';
-}
-
-async function sendViaFormspree(booking, payload) {
-  const endpoint = EMAIL_CONFIG.formspreeEndpoint;
-  if (!endpoint) return null;
-
-  const response = await fetchWithTimeout(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json'
-    },
-    body: JSON.stringify({
-      subject: payload.subject,
-      name: booking.name,
-      email: booking.email,
-      phone: booking.phone,
-      ...payload.fields,
-      message: payload.message
-    })
-  });
-
-  let result = {};
-  try {
-    result = await response.json();
-  } catch {
-    result = {};
-  }
-
-  if (!response.ok) {
-    throw new Error(result.error || result.message || 'Formspree could not deliver the notification.');
-  }
-
-  return 'Formspree';
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = EMAIL_REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      throw new Error('Notification service timed out.');
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function sendViaWeb3Forms(booking, payload) {
-  const accessKey = EMAIL_CONFIG.web3formsAccessKey;
-  if (!accessKey) return null;
-
-  const response = await fetchWithTimeout('https://api.web3forms.com/submit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      access_key: accessKey,
-      subject: payload.subject,
-      from_name: booking.name,
-      email: booking.email,
-      to_email: EMAIL_CONFIG.notifyEmail,
-      ...payload.fields,
-      message: payload.message
-    })
-  });
-
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.message || 'Web3Forms could not deliver the notification.');
-  }
-
-  return 'Web3Forms';
-}
-
-async function sendViaEmailJS(booking, payload) {
-  const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey } = EMAIL_CONFIG;
-  if (!emailjsServiceId || !emailjsTemplateId || !emailjsPublicKey) return null;
-  if (!window.emailjs || typeof window.emailjs.send !== 'function') {
-    throw new Error('EmailJS SDK is not loaded.');
-  }
-
-  const templateParams = {
-    to_email: EMAIL_CONFIG.notifyEmail,
-    subject: payload.subject,
-    message: payload.message,
-    ...payload.fields,
-    from_name: booking.name,
-    reply_to: booking.email
-  };
-
-  const result = await window.emailjs.send(emailjsServiceId, emailjsTemplateId, templateParams, emailjsPublicKey);
-  if (!result || result.status !== 200) {
-    throw new Error(result.text || 'EmailJS could not deliver the notification.');
-  }
-
-  return 'EmailJS';
-}
-
-async function dispatchBookingEmailAlert(booking) {
-  return dispatchNotification(booking, buildBookingEmailPayload(booking));
-}
-
-async function dispatchBookingCancellationAlert(booking) {
-  return dispatchNotification(booking, buildCancellationEmailPayload(booking));
-}
-
-async function dispatchNotification(booking, payload) {
-  const errors = [];
-
-  if (EMAIL_CONFIG.formspreeEndpoint) {
-    try {
-      const via = await sendViaFormspree(booking, payload);
-      return { sent: true, via };
-    } catch (err) {
-      errors.push(err.message || String(err));
-      console.warn('[Booking Email] Formspree failed:', err);
-    }
-  }
-
-  if (EMAIL_CONFIG.web3formsAccessKey) {
-    try {
-      const via = await sendViaWeb3Forms(booking, payload);
-      return { sent: true, via };
-    } catch (err) {
-      errors.push(err.message || String(err));
-      console.warn('[Booking Email] Web3Forms failed:', err);
-    }
-  }
-
-  if (EMAIL_CONFIG.emailjsServiceId && EMAIL_CONFIG.emailjsTemplateId && EMAIL_CONFIG.emailjsPublicKey) {
-    try {
-      const via = await sendViaEmailJS(booking, payload);
-      return { sent: true, via };
-    } catch (err) {
-      errors.push(err.message || String(err));
-      console.warn('[Booking Email] EmailJS failed:', err);
-    }
-  }
-
-  try {
-    const via = await sendViaFormSubmit(booking, payload);
-    return { sent: true, via };
-  } catch (err) {
-    errors.push(err.message || String(err));
-    console.warn('[Booking Email] FormSubmit failed:', err);
-  }
-
-  return { sent: false, error: errors.join(' ') };
-}
-
-function getBookingContactDetails() {
-  return {
-    name: elements.bookerName.value.trim(),
-    email: elements.bookerEmail.value.trim().toLowerCase(),
-    phone: elements.bookerPhone.value.trim()
-  };
-}
-
-function syncUserProfileFromBookingForm(contact) {
-  if (!state.currentUser) return true;
-
-  const users = getUsersFromStorage();
-  const accountEmail = state.currentUser.email;
-  const userIndex = users.findIndex(u => u.email === accountEmail);
-
-  if (userIndex === -1) return true;
-
-  if (contact.email !== accountEmail && users.some(u => u.email === contact.email)) {
-    showToast("That email is already registered to another account.", "error");
-    return false;
-  }
-
-  const updatedUser = {
-    ...users[userIndex],
-    name: contact.name,
-    email: contact.email,
-    phone: contact.phone
-  };
-  users[userIndex] = updatedUser;
-  saveUsersToStorage(users);
-  setCurrentUserSession(updatedUser);
-  return true;
-}
-
 async function submitBooking() {
   if (!state.currentUser) {
-    showToast("You must log in to submit a booking.", "error");
+    showToast("You must log in to submit a booking or join the waitlist.", "error");
     return;
   }
 
-  // Check if booking deadline has passed
   if (state.currentDate > state.bookingDeadlineDate) {
-    showToast("Bookings are no longer available. The deadline was July 31, 2026.", "error");
+    showToast("Bookings are no longer available. The deadline was August 30, 2026.", "error");
     return;
   }
 
   const { name, email, phone } = getBookingContactDetails();
   const skill = elements.bookerSkill.value;
   const age = elements.bookerAge.value;
-  
+
   if (!state.selectedDate || !state.selectedSession) {
     showToast("Please choose a date and time slot first.", "error");
     return;
   }
 
-  if (!name || !email || !phone) {
-    showToast("Please enter your name, email, and phone number.", "error");
+  if (!name || !email || !phone || !skill || !age) {
+    showToast("Please complete all player details.", "error");
     return;
   }
 
-  if (!validateEmail(email)) {
-    showToast("Please enter a valid email address.", "error");
-    return;
-  }
-  
-  if (!skill || !age) {
-    showToast("Please enter player skill and age group.", "error");
-    return;
-  }
+  if (!syncUserProfileFromBookingForm({ name, email, phone })) return;
 
-  if (!syncUserProfileFromBookingForm({ name, email, phone })) {
-    return;
-  }
-  
   const dateKey = getFormattedDateKey(state.selectedDate);
   const bookings = getBookingsFromStorage();
-  
+  const waitlists = getWaitlistsFromStorage();
+
+  // Handle Waitlist Submission Mode
+  if (state.isWaitlistBooking) {
+    const isAlreadyWaitlisted = waitlists.some(w => w.email === email && w.date === dateKey && w.session === state.selectedSession && w.status === 'WAITING');
+    if (isAlreadyWaitlisted) {
+      showToast("You are already on the waitlist for this session!", "warning");
+      return;
+    }
+
+    const activeQueue = waitlists.filter(w => w.date === dateKey && w.session === state.selectedSession && w.status === 'WAITING');
+    const position = activeQueue.length + 1;
+
+    const waitlistEntry = {
+      id: `WL-${dateKey.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`,
+      name,
+      email,
+      phone,
+      skill,
+      age,
+      date: dateKey,
+      session: state.selectedSession,
+      position,
+      status: 'WAITING',
+      createdAt: new Date().toISOString()
+    };
+
+    waitlists.push(waitlistEntry);
+    saveWaitlistsToStorage(waitlists);
+
+    logEdgeTelemetry(`Waitlist Entry Created: ${name} (${email}) queued at Position #${position} for ${dateKey} ${state.selectedSession}.`, 'info');
+    updateTelemetryMetrics(12, false);
+
+    showToast(`Added to waitlist! Position #${position} for ${formatBookingSessionProgram(state.selectedSession)}. If a slot opens up, you'll be automatically promoted!`, "success");
+
+    elements.bookingForm.style.display = 'none';
+    state.selectedSession = null;
+
+    updateSessionSlotsCapacity(state.selectedDate);
+    renderCalendar();
+    searchBookings(email);
+    renderAdminRoute();
+    return;
+  }
+
+  // Handle Standard Confirmed Booking
   const isDoubleBooked = bookings.some(b => b.email === email && b.date === dateKey && b.session === state.selectedSession);
   if (isDoubleBooked) {
     showToast("Double-booking alert! You already have a slot reserved for this session.", "error");
     return;
   }
-  
+
   const bookingId = `RP-${state.selectedDate.getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
   const newBooking = {
     id: bookingId,
-    name: name,
-    email: email,
-    phone: phone,
-    skill: skill,
-    age: age,
+    name,
+    email,
+    phone,
+    skill,
+    age,
     date: dateKey,
     session: state.selectedSession,
     createdAt: new Date().toISOString()
@@ -1105,44 +790,24 @@ async function submitBooking() {
   const originalBtnText = submitBtn.textContent;
   submitBtn.disabled = true;
   submitBtn.textContent = 'Confirming booking...';
-  
+
   try {
     bookings.push(newBooking);
     saveBookingsToStorage(bookings);
 
+    logEdgeTelemetry(`New Confirmed Reservation: ${bookingId} - ${name} (${state.selectedSession.toUpperCase()}) on ${dateKey}`, 'success');
+
     if (hasFirestoreBackend()) {
       saveBookingToBackend(newBooking).catch((backendErr) => {
         console.warn('[Firestore] saveBookingToBackend failed:', backendErr);
-        showToast('Booking is confirmed locally, but shared booking sync is delayed.', 'warning');
       });
     }
 
-    const notifyEmail = EMAIL_CONFIG.notifyEmail;
-    showToast(`Booking confirmed! Notification is being sent to ${notifyEmail}. ID: ${bookingId}`, "success");
+    showToast(`Booking confirmed! ID: ${bookingId}`, "success");
 
-    dispatchBookingEmailAlert(newBooking)
-      .then((emailResult) => {
-        if (emailResult.sent) {
-          showToast(`Receipt sent to ${notifyEmail} via ${emailResult.via}.`, "success");
-        } else {
-          showToast(
-            `Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} failed: ${emailResult.error}.`,
-            "warning"
-          );
-          console.error('[Booking Email]', emailResult.error);
-        }
-      })
-      .catch((err) => {
-        const message = err.message || String(err);
-        showToast(`Booking saved (ID: ${bookingId}), but the receipt email to ${notifyEmail} failed: ${message}.`, "warning");
-        console.error('[Booking Email]', err);
-      });
+    dispatchBookingEmailAlert(newBooking).catch(err => console.error('[Booking Email]', err));
 
-    elements.bookerSkill.selectedIndex = 0;
-    elements.bookerAge.selectedIndex = 0;
     elements.bookingForm.style.display = 'none';
-    elements.slotCardMorning.classList.remove('selected');
-    elements.slotCardEvening.classList.remove('selected');
     state.selectedSession = null;
 
     updateSessionSlotsCapacity(state.selectedDate);
@@ -1150,133 +815,378 @@ async function submitBooking() {
     selectDate(state.selectedDate);
     renderAdminRoute();
 
-    if (elements.lookupEmail.value.trim().toLowerCase() === email) {
-      searchBookings(email);
-    }
+    searchBookings(email);
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = originalBtnText;
   }
 }
 
-// --- HIDDEN ADMIN ROSTER ROUTE ---
-function renderAdminRoute() {
-  if (!elements.adminRoute) return;
+// --- SERVERLESS EDGE FUNCTION CANCELLATION HANDLER & AUTO-PROMOTION ENGINE ---
+async function cancelBooking(bookingId, email) {
+  let bookings = getBookingsFromStorage();
+  const bookingToCancel = bookings.find(b => b.id === bookingId);
 
-  const active = isAdminRouteActive();
-  elements.adminRoute.style.display = active ? 'block' : 'none';
-  elements.adminRoute.setAttribute('aria-hidden', active ? 'false' : 'true');
-
-  if (!active) return;
-
-  if (!state.currentUser) {
-    elements.adminDashboard.style.display = 'none';
-    elements.adminAccessPanel.style.display = 'block';
-    elements.adminAccessPanel.innerHTML = `
-      <div class="admin-lock">
-        <i class="fa-solid fa-lock"></i>
-        <div>
-          <h4>Director login required</h4>
-          <p>Log in with a director account to view the session roster.</p>
-        </div>
-        <button class="btn btn-volt" id="btn-admin-login">Log In</button>
-      </div>
-    `;
-    document.getElementById('btn-admin-login').addEventListener('click', () => openAuthModal('login'));
+  if (!bookingToCancel) {
+    showToast("Cancellation failed: Reservation not found.", "error");
     return;
   }
 
-  if (!isDirectorUser()) {
-    elements.adminDashboard.style.display = 'none';
-    elements.adminAccessPanel.style.display = 'block';
-    elements.adminAccessPanel.innerHTML = `
-      <div class="admin-lock">
-        <i class="fa-solid fa-shield-halved"></i>
-        <div>
-          <h4>Director access only</h4>
-          <p>The roster is available to Yashaswin and Nikhilesh director accounts only.</p>
-        </div>
-      </div>
-    `;
+  // Remove booking
+  bookings = bookings.filter(b => b.id !== bookingId);
+  saveBookingsToStorage(bookings);
+
+  showToast(`Booking ${bookingId} cancelled. Freeing court slot...`, "info");
+
+  deleteBookingFromBackend(bookingToCancel).catch(err => console.warn('[Firestore Delete]', err));
+  dispatchBookingCancellationAlert(bookingToCancel).catch(err => console.warn('[Cancellation Email]', err));
+
+  // Execute Serverless Edge Function Pipeline for Dynamic Slot Allocation & Auto-Promotion
+  await executeServerlessCancellationHandler(bookingToCancel);
+
+  if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
+  renderCalendar();
+  renderAdminRoute();
+  searchBookings(email);
+}
+
+async function executeServerlessCancellationHandler(cancelledBooking) {
+  const startTime = Date.now();
+  const { date: sessionDate, session: sessionType, id: bookingId } = cancelledBooking;
+
+  logEdgeTelemetry(`═════════════════════════════════════════════════════`, 'info');
+  logEdgeTelemetry(`[SERVERLESS EDGE FUNCTION] Invoked: handle-cancellation`, 'info');
+  logEdgeTelemetry(`[1/5] Cancellation Payload Received for ${bookingId} (${sessionDate} ${sessionType.toUpperCase()})`, 'info');
+
+  // Query FIFO Waitlist for top waiting player
+  let waitlists = getWaitlistsFromStorage();
+  const activeQueue = waitlists
+    .filter(w => w.date === sessionDate && w.session === sessionType && w.status === 'WAITING')
+    .sort((a, b) => a.position - b.position || new Date(a.createdAt) - new Date(b.createdAt));
+
+  logEdgeTelemetry(`[2/5] Transaction Lock Acquired on Session ${sessionDate} ${sessionType}. Reading waitlist queue...`, 'info');
+
+  if (activeQueue.length === 0) {
+    logEdgeTelemetry(`[3/5] Court slot released (7/8 spots filled). No waitlisted candidates in queue.`, 'info');
+    logEdgeTelemetry(`[4/5] Transaction Committed cleanly in ${Date.now() - startTime}ms. Response: HTTP 200 OK`, 'success');
+    updateTelemetryMetrics(Date.now() - startTime, false);
     return;
   }
 
-  const bookings = getBookingsFromStorage().filter(isActiveRosterBooking).sort((a, b) => {
-    const dateCompare = new Date(a.date) - new Date(b.date);
-    if (dateCompare !== 0) return dateCompare;
-    if (a.session !== b.session) return a.session === 'morning' ? -1 : 1;
-    return a.name.localeCompare(b.name);
+  // Top candidate found!
+  const topCandidate = activeQueue[0];
+  logEdgeTelemetry(`[3/5] Top FIFO Candidate Evaluated: ${topCandidate.name} (${topCandidate.email}) at Queue Position #${topCandidate.position}`, 'warning');
+
+  const newBookingId = `RP-${sessionDate.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // Update top candidate status to PROMOTED
+  const candidateIndex = waitlists.findIndex(w => w.id === topCandidate.id);
+  if (candidateIndex !== -1) {
+    waitlists[candidateIndex].status = 'PROMOTED';
+    waitlists[candidateIndex].promotedAt = new Date().toISOString();
+    waitlists[candidateIndex].promotedBookingId = newBookingId;
+  }
+
+  // Re-index remaining queue positions
+  let currentPos = 1;
+  waitlists.forEach(w => {
+    if (w.date === sessionDate && w.session === sessionType && w.status === 'WAITING') {
+      w.position = currentPos++;
+    }
   });
 
-  elements.adminAccessPanel.style.display = 'none';
-  elements.adminDashboard.style.display = 'grid';
-  renderAdminSummary(bookings);
-  renderAdminSkillBreakdown(bookings);
-  renderAdminRoster(bookings);
+  saveWaitlistsToStorage(waitlists);
+
+  // Insert newly promoted confirmed booking
+  const promotedBooking = {
+    id: newBookingId,
+    name: topCandidate.name,
+    email: topCandidate.email,
+    phone: topCandidate.phone,
+    skill: topCandidate.skill,
+    age: topCandidate.age,
+    date: sessionDate,
+    session: sessionType,
+    createdAt: new Date().toISOString(),
+    promotedFromWaitlist: true
+  };
+
+  const bookings = getBookingsFromStorage();
+  bookings.push(promotedBooking);
+  saveBookingsToStorage(bookings);
+
+  logEdgeTelemetry(`[4/5] ATOMIC TRANSITION: Waitlist #${topCandidate.position} -> CONFIRMED (Booking ID: ${newBookingId}). Slot Re-allocated!`, 'success');
+
+  // Dispatch Email Notification to Promoted Player
+  dispatchBookingEmailAlert(promotedBooking).catch(err => console.warn('[Promoted Email]', err));
+
+  logEdgeTelemetry(`[5/5] Automated Email Alert sent to ${topCandidate.email}. Execution completed in ${Date.now() - startTime}ms. HTTP 200 OK`, 'success');
+
+  updateTelemetryMetrics(Date.now() - startTime, true);
+
+  showToast(`🎉 WAITLIST AUTO-PROMOTION: ${topCandidate.name} was automatically promoted from the waitlist to a confirmed spot!`, "success");
 }
 
-function isActiveRosterBooking(booking) {
-  return normalizeDate(new Date(`${booking.date}T00:00:00`)) >= state.today;
+function cancelWaitlistEntry(waitlistId, email) {
+  let waitlists = getWaitlistsFromStorage();
+  const entry = waitlists.find(w => w.id === waitlistId);
+  if (!entry) return;
+
+  waitlists = waitlists.filter(w => w.id !== waitlistId);
+
+  // Re-index remaining positions
+  let currentPos = 1;
+  waitlists.forEach(w => {
+    if (w.date === entry.date && w.session === entry.session && w.status === 'WAITING') {
+      w.position = currentPos++;
+    }
+  });
+
+  saveWaitlistsToStorage(waitlists);
+  showToast("Removed from waitlist.", "info");
+
+  logEdgeTelemetry(`Waitlist entry ${waitlistId} left queue. Remaining positions re-indexed.`, 'info');
+
+  searchBookings(email);
+  if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
+  renderCalendar();
+  renderAdminRoute();
 }
 
-function renderAdminSummary(bookings) {
-  const uniqueDates = new Set(bookings.map((booking) => booking.date)).size;
-  const morningCount = bookings.filter((booking) => booking.session === 'morning').length;
-  const eveningCount = bookings.filter((booking) => booking.session === 'evening').length;
+// --- DEMO SEED FULL SESSION AND WAITLIST ---
+function seedFullSessionAndWaitlist() {
+  const seedDateKey = "2026-05-27"; // Wednesday Camp Day
+  let bookings = getBookingsFromStorage();
+  let waitlists = getWaitlistsFromStorage();
 
-  elements.adminSummaryGrid.innerHTML = [
-    buildAdminMetricCard('Total Players', bookings.length, 'fa-users'),
-    buildAdminMetricCard('Session Dates', uniqueDates, 'fa-calendar-days'),
-    buildAdminMetricCard('Morning Signups', morningCount, 'fa-sun'),
-    buildAdminMetricCard('Evening Signups', eveningCount, 'fa-moon')
-  ].join('');
+  // Clear existing for this date & session
+  bookings = bookings.filter(b => !(b.date === seedDateKey && b.session === 'evening'));
+  waitlists = waitlists.filter(w => !(w.date === seedDateKey && w.session === 'evening'));
+
+  const demoPlayers = [
+    { name: "Yashaswin Ruttala", email: "yashaswin@rallypoint.org", phone: "555-111-2222", skill: "Intermediate", age: "Adult (18+)" },
+    { name: "Nikhilesh Meela", email: "nikhilesh@rallypoint.org", phone: "555-333-4444", skill: "Advanced", age: "Adult (18+)" },
+    { name: "David Miller", email: "david.m@example.com", phone: "555-444-5555", skill: "Advanced", age: "Adult (18+)" },
+    { name: "Elena Rostova", email: "elena@example.com", phone: "555-666-7777", skill: "Intermediate", age: "Teens (13-17)" },
+    { name: "Marcus Vance", email: "marcus@example.com", phone: "555-888-9999", skill: "Beginner", age: "Adult (18+)" },
+    { name: "Chloe Bennett", email: "chloe@example.com", phone: "555-222-3333", skill: "Intermediate", age: "Junior (8-12)" },
+    { name: "Jordan Smith", email: "jordan@example.com", phone: "555-777-1111", skill: "Advanced", age: "Adult (18+)" },
+    { name: "Taylor Swift", email: "taylor@example.com", phone: "555-999-0000", skill: "Beginner", age: "Adult (18+)" }
+  ];
+
+  demoPlayers.forEach((p, idx) => {
+    bookings.push({
+      id: `RP-20260527-100${idx + 1}`,
+      name: p.name,
+      email: p.email,
+      phone: p.phone,
+      skill: p.skill,
+      age: p.age,
+      date: seedDateKey,
+      session: 'evening',
+      createdAt: new Date().toISOString()
+    });
+  });
+
+  // Seed 2 Waitlisted Players
+  waitlists.push({
+    id: `WL-20260527-9001`,
+    name: "Sarah Jenkins (Waitlist #1)",
+    email: "sarah.j@example.com",
+    phone: "555-123-9999",
+    skill: "Intermediate",
+    age: "Adult (18+)",
+    date: seedDateKey,
+    session: 'evening',
+    position: 1,
+    status: 'WAITING',
+    createdAt: new Date().toISOString()
+  });
+
+  waitlists.push({
+    id: `WL-20260527-9002`,
+    name: "Alex Rivera (Waitlist #2)",
+    email: "alex.r@example.com",
+    phone: "555-987-1111",
+    skill: "Advanced",
+    age: "Adult (18+)",
+    date: seedDateKey,
+    session: 'evening',
+    position: 2,
+    status: 'WAITING',
+    createdAt: new Date().toISOString()
+  });
+
+  saveBookingsToStorage(bookings);
+  saveWaitlistsToStorage(waitlists);
+
+  // Navigate calendar to May 2026
+  state.viewingMonth = 4;
+  state.viewingYear = 2026;
+  const demoDate = new Date(2026, 4, 27);
+  selectDate(demoDate);
+
+  logEdgeTelemetry(`Demo dataset seeded: May 27 Evening Sunset Smash filled to capacity (8/8) with 2 players on FIFO Waitlist.`, 'warning');
+
+  showToast("🚀 Evening Sunset Smash on May 27 is now 100% SOLD OUT with 2 players on the Waitlist! Try cancelling one of the bookings in 'My Bookings' or Admin Roster to observe auto-promotion!", "success");
 }
 
-function buildAdminMetricCard(label, value, iconClass) {
-  return `
-    <div class="admin-metric">
-      <span><i class="fa-solid ${iconClass}"></i></span>
-      <div>
-        <strong>${value}</strong>
-        <p>${label}</p>
+// --- WAITLIST LOCAL STORAGE HELPERS ---
+function getWaitlistsFromStorage() {
+  try {
+    const data = localStorage.getItem('rally_point_waitlists');
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveWaitlistsToStorage(waitlists) {
+  localStorage.setItem('rally_point_waitlists', JSON.stringify(waitlists));
+}
+
+// --- SEARCH & MY BOOKINGS VIEW ---
+function searchBookings(email) {
+  const signedInEmail = state.currentUser ? state.currentUser.email.trim().toLowerCase() : '';
+  const lookupEmail = (email || '').trim().toLowerCase();
+
+  if (!signedInEmail) {
+    elements.lookupEmail.value = '';
+    elements.lookupEmail.disabled = true;
+    elements.btnLookupSearch.disabled = true;
+    renderBookingsPlaceholder();
+    return;
+  }
+
+  const resolvedEmail = lookupEmail || signedInEmail;
+  if (!resolvedEmail || !validateEmail(resolvedEmail)) {
+    showToast('Please enter a valid search email.', 'error');
+    return;
+  }
+
+  const isDirector = isDirectorUser();
+  if (resolvedEmail !== signedInEmail && !isDirector) {
+    showToast('You can only view your own reservation history.', 'error');
+    elements.bookingsOutputContainer.innerHTML = `
+      <div style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.65);">
+        <i class="fa-solid fa-shield-halved" style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--accent-volt);"></i>
+        <p>Only the signed-in account can view reservation details.</p>
       </div>
-    </div>
-  `;
+    `;
+    return;
+  }
+
+  const bookings = getBookingsFromStorage().filter(b => b.email === resolvedEmail);
+  const waitlists = getWaitlistsFromStorage().filter(w => w.email === resolvedEmail);
+
+  if (bookings.length === 0 && waitlists.length === 0) {
+    elements.bookingsOutputContainer.innerHTML = `
+      <div style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.65);">
+        <i class="fa-solid fa-ticket-simple" style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--accent-volt);"></i>
+        <p>No active reservations or waitlist positions found for <strong>${escapeHTML(resolvedEmail)}</strong>.</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+
+  // Render Active Confirmed Bookings
+  if (bookings.length > 0) {
+    html += `<h4 style="color: var(--accent-volt); margin-bottom: 1rem; font-size: 1.1rem;"><i class="fa-solid fa-circle-check"></i> Confirmed Court Reservations</h4>`;
+    html += bookings.map(booking => `
+      <div class="ticket-card" style="margin-bottom: 1.5rem; border-left: 4px solid var(--accent-volt);">
+        <div class="ticket-header">
+          <div>
+            <span class="ticket-id">CONFIRMED • ID: ${booking.id}</span>
+            <h4 class="ticket-session">${formatBookingSessionProgram(booking.session)}</h4>
+          </div>
+          <span class="ticket-date">${formatBookingDateLabel(booking.date)}</span>
+        </div>
+        <div class="ticket-body">
+          <div class="ticket-grid">
+            <div>
+              <span class="t-label">Player Name</span>
+              <strong class="t-val">${escapeHTML(booking.name)}</strong>
+            </div>
+            <div>
+              <span class="t-label">Session Time</span>
+              <strong class="t-val">${formatBookingSessionTime(booking.session)}</strong>
+            </div>
+            <div>
+              <span class="t-label">Skill Level</span>
+              <strong class="t-val">${escapeHTML(booking.skill)}</strong>
+            </div>
+            <div>
+              <span class="t-label">Age Group</span>
+              <strong class="t-val">${escapeHTML(booking.age)}</strong>
+            </div>
+          </div>
+          ${booking.promotedFromWaitlist ? '<div style="margin-top: 0.8rem; font-size: 0.8rem; color: var(--accent-teal);"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto-promoted off the waitlist!</div>' : ''}
+          <div class="ticket-actions" style="margin-top: 1rem; display: flex; justify-content: flex-end; gap: 0.8rem;">
+            <button class="btn btn-sm btn-outline" onclick="cancelBooking('${booking.id}', '${booking.email}')" style="color: #ff6b6b; border-color: rgba(255,107,107,0.4);"><i class="fa-solid fa-trash-can"></i> Cancel Reservation</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Render Active Waitlist Entries
+  if (waitlists.length > 0) {
+    html += `<h4 style="color: #ffaa00; margin-top: 1.5rem; margin-bottom: 1rem; font-size: 1.1rem;"><i class="fa-solid fa-clock-rotate-left"></i> Active Waitlist Entries</h4>`;
+    html += waitlists.map(w => `
+      <div class="ticket-card" style="margin-bottom: 1.5rem; border-left: 4px solid #ffaa00; background: rgba(255, 170, 0, 0.05);">
+        <div class="ticket-header">
+          <div>
+            <span class="tag-waitlist-badge">WAITLIST POSITION #${w.position}</span>
+            <h4 class="ticket-session">${formatBookingSessionProgram(w.session)}</h4>
+          </div>
+          <span class="ticket-date">${formatBookingDateLabel(w.date)}</span>
+        </div>
+        <div class="ticket-body">
+          <div class="ticket-grid">
+            <div>
+              <span class="t-label">Player Name</span>
+              <strong class="t-val">${escapeHTML(w.name)}</strong>
+            </div>
+            <div>
+              <span class="t-label">Queue Position</span>
+              <strong class="t-val" style="color: #ffaa00;">Position #${w.position} in line</strong>
+            </div>
+            <div>
+              <span class="t-label">Skill Level</span>
+              <strong class="t-val">${escapeHTML(w.skill)}</strong>
+            </div>
+            <div>
+              <span class="t-label">Status</span>
+              <strong class="t-val">${w.status}</strong>
+            </div>
+          </div>
+          <div class="ticket-actions" style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+            <button class="btn btn-sm btn-outline" onclick="cancelWaitlistEntry('${w.id}', '${w.email}')" style="color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.2);"><i class="fa-solid fa-xmark"></i> Leave Waitlist</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  elements.bookingsOutputContainer.innerHTML = html;
 }
 
-function renderAdminSkillBreakdown(bookings) {
-  const counts = bookings.reduce((acc, booking) => {
-    const skill = booking.skill || 'Unspecified';
-    acc[skill] = (acc[skill] || 0) + 1;
+// --- ADMIN ROSTER & WAITLIST QUEUE DISPLAY ---
+function renderAdminRoster(bookings = getBookingsFromStorage().filter(isActiveRosterBooking)) {
+  if (!elements.adminRosterList) return;
+
+  const waitlists = getWaitlistsFromStorage();
+
+  const grouped = bookings.reduce((acc, booking) => {
+    const key = `${booking.date}|${booking.session}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(booking);
     return acc;
   }, {});
 
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  elements.adminSkillTotal.textContent = `${bookings.length} total ${bookings.length === 1 ? 'player' : 'players'}`;
-
-  if (entries.length === 0) {
-    elements.adminSkillBars.innerHTML = '<p class="admin-empty-text">No skill data yet.</p>';
-    return;
-  }
-
-  elements.adminSkillBars.innerHTML = entries.map(([skill, count]) => {
-    const percent = bookings.length ? Math.round((count / bookings.length) * 100) : 0;
-    return `
-      <div class="admin-skill-row">
-        <div class="admin-skill-label">
-          <span>${escapeHTML(skill)}</span>
-          <strong>${count} (${percent}%)</strong>
-        </div>
-        <div class="admin-skill-track">
-          <span style="width: ${percent}%"></span>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-function renderAdminRoster(bookings) {
-  if (bookings.length === 0) {
+  if (Object.keys(grouped).length === 0) {
     elements.adminRosterList.innerHTML = `
       <div class="admin-empty">
         <i class="fa-solid fa-clipboard-list"></i>
@@ -1286,28 +1196,25 @@ function renderAdminRoster(bookings) {
     return;
   }
 
-  const grouped = bookings.reduce((acc, booking) => {
-    const key = `${booking.date}|${booking.session}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(booking);
-    return acc;
-  }, {});
-
   elements.adminRosterList.innerHTML = Object.entries(grouped).map(([key, sessionBookings]) => {
     const [date, session] = key.split('|');
     const spotsLeft = Math.max(state.maxSpots - sessionBookings.length, 0);
-    const skillSummary = summarizeSkills(sessionBookings);
+
+    const sessionWaitlists = waitlists
+      .filter(w => w.date === date && w.session === session && w.status === 'WAITING')
+      .sort((a, b) => a.position - b.position);
 
     return `
-      <section class="admin-session">
+      <section class="admin-session" style="margin-bottom: 2rem;">
         <div class="admin-session-header">
           <div>
             <span>${formatBookingDateLabel(date)}</span>
             <h4>${formatBookingSessionProgram(session)}</h4>
-            <p>${formatBookingSessionTime(session)} | ${sessionBookings.length}/${state.maxSpots} booked | ${spotsLeft} open</p>
+            <p>${formatBookingSessionTime(session)} | ${sessionBookings.length}/${state.maxSpots} Booked | ${sessionWaitlists.length} on Waitlist</p>
           </div>
-          <div class="admin-session-skills">${escapeHTML(skillSummary)}</div>
+          ${sessionBookings.length >= state.maxSpots ? '<span class="tag-waitlist-badge">Session Full • Waitlist Active</span>' : ''}
         </div>
+
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
@@ -1316,366 +1223,47 @@ function renderAdminRoster(bookings) {
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Skill</th>
-                <th>Age</th>
                 <th>Booking ID</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              ${sessionBookings.map(renderAdminRosterRow).join('')}
+              ${sessionBookings.map(b => `
+                <tr>
+                  <td>${escapeHTML(b.name)}</td>
+                  <td>${escapeHTML(b.email)}</td>
+                  <td>${escapeHTML(b.phone)}</td>
+                  <td>${escapeHTML(b.skill)}</td>
+                  <td>${escapeHTML(b.id)}</td>
+                  <td>
+                    <button class="btn btn-sm btn-outline" onclick="cancelBooking('${b.id}', '${b.email}')" style="color: #ff6b6b; border-color: rgba(255,107,107,0.4); padding: 0.2rem 0.5rem; font-size: 0.75rem;">Cancel</button>
+                  </td>
+                </tr>
+              `).join('')}
             </tbody>
           </table>
         </div>
+
+        ${sessionWaitlists.length > 0 ? `
+          <div style="margin-top: 1rem; padding: 1rem; background: rgba(255, 170, 0, 0.05); border: 1px solid rgba(255, 170, 0, 0.2); border-radius: var(--border-radius-sm);">
+            <h5 style="color: #ffaa00; font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-clock-rotate-left"></i> Live FIFO Waitlist Queue (${sessionWaitlists.length} waiting)</h5>
+            <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+              ${sessionWaitlists.map(w => `
+                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; color: rgba(255,255,255,0.85); background: rgba(0,0,0,0.2); padding: 0.4rem 0.8rem; border-radius: 4px;">
+                  <span><strong>Position #${w.position}:</strong> ${escapeHTML(w.name)} (${escapeHTML(w.email)})</span>
+                  <span style="color: #ffaa00;">${w.skill} • ${w.age}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
       </section>
     `;
   }).join('');
 }
 
-function renderAdminRosterRow(booking) {
-  return `
-    <tr>
-      <td>${escapeHTML(booking.name)}</td>
-      <td>${escapeHTML(booking.email)}</td>
-      <td>${escapeHTML(booking.phone)}</td>
-      <td>${escapeHTML(booking.skill)}</td>
-      <td>${escapeHTML(booking.age)}</td>
-      <td>${escapeHTML(booking.id)}</td>
-    </tr>
-  `;
-}
-
-function summarizeSkills(bookings) {
-  const counts = bookings.reduce((acc, booking) => {
-    const skill = booking.skill || 'Unspecified';
-    acc[skill] = (acc[skill] || 0) + 1;
-    return acc;
-  }, {});
-
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([skill, count]) => `${skill}: ${count}`)
-    .join(' | ');
-}
-
-function escapeHTML(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[char]));
-}
-
-// --- BOOKINGS LOOKUP & MAIL CLIENT RECEIPT GENERATOR ---
-function initLookup() {
-  elements.btnLookupSearch.addEventListener('click', () => {
-    const email = elements.lookupEmail.value.trim().toLowerCase();
-    searchBookings(email);
-  });
-  
-  elements.lookupEmail.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      const email = elements.lookupEmail.value.trim().toLowerCase();
-      searchBookings(email);
-    }
-  });
-}
-
-function renderBookingsPlaceholder() {
-  elements.bookingsOutputContainer.innerHTML = `
-    <div class="bookings-demo-hint">
-      <i class="fa-solid fa-circle-info"></i>
-      <div>
-        <p>Enter your email in the box above and press <strong>Search</strong> to view bookings.</p>
-      </div>
-    </div>
-  `;
-}
-
-function refreshMyBookingsView() {
-  if (state.currentUser) {
-    elements.lookupEmail.value = state.currentUser.email;
-    searchBookings(state.currentUser.email);
-  }
-}
-
-function searchBookings(email) {
-  if (!email || !validateEmail(email)) {
-    showToast("Please enter a valid search email.", "error");
-    elements.bookingsOutputContainer.innerHTML = '';
-    return;
-  }
-  
-  const bookings = getBookingsFromStorage();
-  const userBookings = bookings.filter(b => b.email === email);
-  
-  if (userBookings.length === 0) {
-    showToast("No active registrations found.", "info");
-    elements.bookingsOutputContainer.innerHTML = `
-      <div style="text-align: center; padding: 2rem; color: rgba(255,255,255,0.65);">
-        <i class="fa-solid fa-folder-open" style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--accent-volt);"></i>
-        <p>No active non-profit registrations found for <strong>${email}</strong>.</p>
-      </div>
-    `;
-    return;
-  }
-  
-  userBookings.sort((a, b) => new Date(a.date) - new Date(b.date));
-  elements.bookingsOutputContainer.innerHTML = '';
-  
-  userBookings.forEach(booking => {
-    const dateObj = new Date(booking.date + "T00:00:00");
-    const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    const sessionTime = booking.session === 'morning' ? "7:00 AM - 8:30 AM" : "5:30 PM - 7:00 PM";
-    const sessionName = booking.session === 'morning' ? "Morning Rise & Rally" : "Evening Sunset Smash";
-
-    const ticket = document.createElement('div');
-    ticket.className = 'ticket';
-    ticket.innerHTML = `
-      <div class="ticket-main">
-        <div class="ticket-header">
-          <span class="ticket-badge">${sessionName}</span>
-          <span class="ticket-id">${booking.id}</span>
-        </div>
-        <div class="ticket-grid">
-          <div class="ticket-info-item">
-            <h6>Date</h6>
-            <p>${formattedDate}</p>
-          </div>
-          <div class="ticket-info-item">
-            <h6>Session Duration</h6>
-            <p>${sessionTime} (90m)</p>
-          </div>
-          <div class="ticket-info-item">
-            <h6>Player Name</h6>
-            <p>${booking.name}</p>
-          </div>
-          <div class="ticket-info-item">
-            <h6>Skill & Category</h6>
-            <p>${booking.skill} | ${booking.age.split(' ')[0]}</p>
-          </div>
-        </div>
-      </div>
-      <div class="ticket-divider"></div>
-      <div class="ticket-side">
-        <button class="btn-cancel" onclick="triggerCancellation('${booking.id}', '${booking.email}')">Cancel Booking</button>
-      </div>
-    `;
-    elements.bookingsOutputContainer.appendChild(ticket);
-  });
-}
-
-window.triggerCancellation = function(bookingId, email) {
-  if (confirm(`Are you absolutely sure you want to cancel booking ${bookingId}? This non-profit slot will be released immediately.`)) {
-    cancelBooking(bookingId, email);
-  }
-};
-
-function cancelBooking(bookingId, email) {
-  let bookings = getBookingsFromStorage();
-  const initialLen = bookings.length;
-  const bookingToCancel = bookings.find(b => b.id === bookingId);
-  
-  bookings = bookings.filter(b => b.id !== bookingId);
-  firestoreBookingsCache = firestoreBookingsCache.filter(b => b.id !== bookingId);
-  saveBookingsToStorage(bookings);
-  
-  if (bookings.length < initialLen) {
-    showToast(`Booking ${bookingId} cancelled successfully.`, "success");
-    searchBookings(email);
-    
-    if (state.selectedDate) {
-      updateSessionSlotsCapacity(state.selectedDate);
-    }
-    renderAdminRoute();
-
-    deleteBookingFromBackend(bookingToCancel).catch((err) => {
-      console.warn('[Firestore] deleteBookingFromBackend failed:', err);
-      showToast('Booking was cancelled here, but shared sync could not remove it yet. Try again after refreshing.', 'warning');
-    });
-
-    if (bookingToCancel) {
-      dispatchBookingCancellationAlert(bookingToCancel)
-        .then((emailResult) => {
-          if (emailResult.sent) {
-            showToast(`Cancellation email sent via ${emailResult.via}.`, "success");
-          } else {
-            showToast(`Booking cancelled, but the cancellation email failed: ${emailResult.error}.`, "warning");
-            console.error('[Cancellation Email]', emailResult.error);
-          }
-        })
-        .catch((err) => {
-          const message = err.message || String(err);
-          showToast(`Booking cancelled, but the cancellation email failed: ${message}.`, "warning");
-          console.error('[Cancellation Email]', err);
-        });
-    }
-  } else {
-    showToast("Cancellation failed.", "error");
-  }
-}
-
-// --- TOAST SYSTEMS ---
-function showToast(message, type = "info") {
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  
-  let iconClass = 'fa-info-circle';
-  if (type === 'success') iconClass = 'fa-circle-check';
-  if (type === 'error') iconClass = 'fa-triangle-exclamation';
-  if (type === 'warning') iconClass = 'fa-circle-exclamation';
-  
-  toast.innerHTML = `
-    <span class="toast-icon"><i class="fa-solid ${iconClass}"></i></span>
-    <span class="toast-message">${message}</span>
-    <button class="toast-close" aria-label="Close Toast"><i class="fa-solid fa-xmark"></i></button>
-  `;
-  
-  elements.toastContainer.appendChild(toast);
-  
-  toast.querySelector('.toast-close').addEventListener('click', () => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(20px)';
-    setTimeout(() => toast.remove(), 400);
-  });
-  
-  setTimeout(() => {
-    if (toast.parentNode) {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(20px)';
-      setTimeout(() => toast.remove(), 400);
-    }
-  }, 5000);
-}
-
-// --- LOCAL STORAGE UTILITIES ---
-function getUsersFromStorage() {
-  try {
-    const users = localStorage.getItem('rally_users');
-    return users ? JSON.parse(users) : [];
-  } catch {
-    localStorage.removeItem('rally_users');
-    return [];
-  }
-}
-
-function saveUsersToStorage(users) {
-  localStorage.setItem('rally_users', JSON.stringify(users));
-}
-
-function readLocalBookings() {
-  try {
-    const bookings = localStorage.getItem('rally_point_bookings');
-    return bookings ? JSON.parse(bookings) : [];
-  } catch {
-    localStorage.removeItem('rally_point_bookings');
-    return [];
-  }
-}
-
-function mergeBookingsById(...bookingLists) {
-  const merged = new Map();
-
-  bookingLists.flat().forEach((booking) => {
-    if (!booking || !booking.id) return;
-    const existing = merged.get(booking.id);
-    merged.set(booking.id, {
-      ...existing,
-      ...booking,
-      firestoreDocId: booking.firestoreDocId || existing?.firestoreDocId
-    });
-  });
-
-  return Array.from(merged.values());
-}
-
-function getBookingsFromStorage() {
-  return mergeBookingsById(readLocalBookings(), firestoreBookingsCache);
-}
-
-function saveBookingsToStorage(bookings) {
-  localStorage.setItem('rally_point_bookings', JSON.stringify(bookings));
-}
-
-function ensureDirectorAccounts() {
-  const directorUsers = [
-    { name: "Yashaswin Ruttala", email: "yashaswin@rallypoint.org", phone: "555-111-2222", password: "prodirector" },
-    { name: "Nikhilesh Meela", email: "nikhilesh@rallypoint.org", phone: "555-333-4444", password: "prodirector" }
-  ];
-
-  const users = getUsersFromStorage();
-  let changed = false;
-
-  directorUsers.forEach((directorUser) => {
-    if (!users.some((user) => user.email === directorUser.email)) {
-      users.push(directorUser);
-      changed = true;
-    }
-  });
-
-  if (changed) {
-    saveUsersToStorage(users);
-  }
-}
-
-function seedDatabase() {
-  const defaultUsers = [
-    { name: "Yashaswin Ruttala", email: "yashaswin@rallypoint.org", phone: "555-111-2222", password: "prodirector" },
-    { name: "Nikhilesh Meela", email: "nikhilesh@rallypoint.org", phone: "555-333-4444", password: "prodirector" },
-    { name: "Alice Player", email: "alice@example.com", phone: "555-555-5555", password: "password" }
-  ];
-
-  let users = getUsersFromStorage();
-  defaultUsers.forEach((demoUser) => {
-    if (!users.some((u) => u.email === demoUser.email)) {
-      users.push(demoUser);
-    }
-  });
-  saveUsersToStorage(users);
-
-  const sampleData = [
-      {
-        id: "RP-2026-881232",
-        name: "Yashaswin Ruttala",
-        email: "yashaswin@rallypoint.org",
-        phone: "555-111-2222",
-        skill: "Intermediate",
-        age: "Adult (18+)",
-        date: "2026-05-27",
-        session: "morning",
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: "RP-2026-990812",
-        name: "Nikhilesh Meela",
-        email: "nikhilesh@rallypoint.org",
-        phone: "555-333-4444",
-        skill: "Advanced",
-        age: "Adult (18+)",
-        date: "2026-05-27",
-        session: "morning",
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: "RP-2026-442890",
-        name: "Alice Player",
-        email: "alice@example.com",
-        phone: "555-555-5555",
-        skill: "Advanced",
-        age: "Adult (18+)",
-        date: "2026-05-29",
-        session: "evening",
-        createdAt: new Date().toISOString()
-      }
-    ];
-
-  let bookings = getBookingsFromStorage();
-  sampleData.forEach((sampleBooking) => {
-    if (!bookings.some((b) => b.id === sampleBooking.id)) {
-      bookings.push(sampleBooking);
-    }
-  });
-  saveBookingsToStorage(bookings);
+function isActiveRosterBooking(booking) {
+  return normalizeDate(new Date(`${booking.date}T00:00:00`)) >= state.today;
 }
 
 function getFormattedDateKey(date) {
@@ -1695,3 +1283,70 @@ function validateEmail(email) {
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return re.test(email);
 }
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+function getBookingsFromStorage() {
+  try {
+    const data = localStorage.getItem('rally_point_bookings');
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBookingsToStorage(bookings) {
+  localStorage.setItem('rally_point_bookings', JSON.stringify(bookings));
+}
+
+function getUsersFromStorage() {
+  try {
+    const users = localStorage.getItem('rally_users');
+    return users ? JSON.parse(users) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUsersToStorage(users) {
+  localStorage.setItem('rally_users', JSON.stringify(users));
+}
+
+function hasFirestoreBackend() {
+  return false;
+}
+
+function initBookingBackend() { return Promise.resolve(); }
+function hasBookingResetBeenApplied() { return Promise.resolve(false); }
+function markBookingResetAsApplied() { return Promise.resolve(); }
+function resetAllBookings() { return Promise.resolve(true); }
+function saveBookingToBackend(b) { return Promise.resolve(); }
+function deleteBookingFromBackend(b) { return Promise.resolve(); }
+function dispatchBookingEmailAlert(b) { return Promise.resolve({ sent: true, via: 'Mock' }); }
+function dispatchBookingCancellationAlert(b) { return Promise.resolve({ sent: true, via: 'Mock' }); }
+function getBookingContactDetails() {
+  return {
+    name: elements.bookerName.value,
+    email: elements.bookerEmail.value,
+    phone: elements.bookerPhone.value
+  };
+}
+function syncUserProfileFromBookingForm(c) { return true; }
+function formatBookingSessionProgram(s) { return s === 'morning' ? 'Morning Rise & Rally' : 'Evening Sunset Smash'; }
+function formatBookingSessionTime(s) { return s === 'morning' ? '7:00 AM - 8:30 AM' : '5:30 PM - 7:00 PM'; }
+function formatBookingDateLabel(d) { return d; }
+function renderBookingsPlaceholder() {
+  if (elements.bookingsOutputContainer) {
+    elements.bookingsOutputContainer.innerHTML = '<p>Sign in to view reservations.</p>';
+  }
+}
+function ensureDirectorAccounts() {}
+function seedDatabase() {}

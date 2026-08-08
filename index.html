@@ -506,6 +506,278 @@
     </div>
   </section>
 
+  <!-- Database Architecture & Design Blueprint Modal -->
+  <div class="db-modal-wrapper" id="db-architecture-modal" style="display: none;">
+    <div class="db-modal">
+      <div class="db-modal-header">
+        <div>
+          <span class="db-badge"><i class="fa-solid fa-database"></i> System Design Blueprint</span>
+          <h3>Database Architecture & Algorithmic Execution Engine</h3>
+        </div>
+        <button class="db-close-btn" id="db-modal-close" aria-label="Close Modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="db-tabs">
+        <button class="db-tab active" data-target="db-tab-relational"><i class="fa-solid fa-table"></i> Relational SQL Schema</button>
+        <button class="db-tab" data-target="db-tab-document"><i class="fa-solid fa-file-code"></i> NoSQL Document Schema</button>
+        <button class="db-tab" data-target="db-tab-concurrency"><i class="fa-solid fa-lock"></i> Locking & Concurrency</button>
+        <button class="db-tab" data-target="db-tab-algorithm"><i class="fa-solid fa-diagram-project"></i> Auto-Promotion Flow</button>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div class="db-modal-body">
+
+        <!-- Tab 1: Relational Schema DDL -->
+        <div class="db-tab-content active" id="db-tab-relational">
+          <div class="db-section-desc">
+            <h5>PostgreSQL / Supabase Relational Schema</h5>
+            <p>Designed for ACID compliance, strict foreign key references, cascading constraints, and optimized B-Tree indexes for fast FIFO waitlist queries.</p>
+          </div>
+          <pre class="code-block"><code>-- 1. SESSIONS TABLE (Tracks daily morning/evening capacities)
+CREATE TABLE sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_date DATE NOT NULL,
+  session_type VARCHAR(20) NOT NULL CHECK (session_type IN ('morning', 'evening')),
+  max_capacity INT NOT NULL DEFAULT 8,
+  confirmed_count INT NOT NULL DEFAULT 0,
+  waitlist_count INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (session_date, session_type)
+);
+
+-- 2. COURT RESERVATIONS TABLE (Confirmed bookings)
+CREATE TABLE court_reservations (
+  id VARCHAR(50) PRIMARY KEY, -- e.g. RP-20260527-9482
+  session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  user_name VARCHAR(100) NOT NULL,
+  user_email VARCHAR(150) NOT NULL,
+  user_phone VARCHAR(30) NOT NULL,
+  skill_level VARCHAR(30) NOT NULL,
+  age_category VARCHAR(30) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED' CHECK (status IN ('CONFIRMED', 'CANCELLED', 'COMPLETED')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  cancelled_at TIMESTAMPTZ
+);
+
+-- 3. WAITLIST QUEUE TABLE (FIFO Priority Queue)
+CREATE TABLE waitlist_queue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  session_date DATE NOT NULL,
+  session_type VARCHAR(20) NOT NULL,
+  user_name VARCHAR(100) NOT NULL,
+  user_email VARCHAR(150) NOT NULL,
+  user_phone VARCHAR(30) NOT NULL,
+  skill_level VARCHAR(30) NOT NULL,
+  age_category VARCHAR(30) NOT NULL,
+  position INT NOT NULL, -- 1, 2, 3... FIFO position
+  status VARCHAR(20) NOT NULL DEFAULT 'WAITING' CHECK (status IN ('WAITING', 'NOTIFIED_OFFER', 'PROMOTED', 'EXPIRED', 'CANCELLED')),
+  offer_expires_at TIMESTAMPTZ, -- For time-window offer claim mode
+  promoted_booking_id VARCHAR(50),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  promoted_at TIMESTAMPTZ
+);
+
+-- 4. PROMOTION AUDIT LOGS TABLE
+CREATE TABLE promotion_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_date DATE NOT NULL,
+  session_type VARCHAR(20) NOT NULL,
+  cancelled_booking_id VARCHAR(50) NOT NULL,
+  promoted_user_email VARCHAR(150) NOT NULL,
+  waitlist_position INT NOT NULL,
+  promoted_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- INDEXES FOR FAST FIFO QUEUE LOOKUPS
+CREATE INDEX idx_waitlist_fifo ON waitlist_queue (session_date, session_type, status, position ASC, created_at ASC);
+CREATE INDEX idx_reservations_lookup ON court_reservations (user_email, status);</code></pre>
+        </div>
+
+        <!-- Tab 2: Document Schema -->
+        <div class="db-tab-content" id="db-tab-document">
+          <div class="db-section-desc">
+            <h5>Firestore / MongoDB NoSQL Document Structure</h5>
+            <p>Denormalized document model for low-latency client subscriptions (`onSnapshot`) and real-time state synchronization.</p>
+          </div>
+          <pre class="code-block"><code>// Collection: sessions / {sessionId}
+{
+  "id": "session_2026-05-27_evening",
+  "date": "2026-05-27",
+  "sessionType": "evening", // Evening Sunset Smash
+  "maxCapacity": 8,
+  "confirmedBookingsCount": 8,
+  "waitlistCount": 2,
+  "updatedAt": "2026-08-08T11:45:00.000Z"
+}
+
+// Collection: bookings / {bookingId}
+{
+  "id": "RP-20260527-8812",
+  "sessionId": "session_2026-05-27_evening",
+  "userEmail": "player1@example.com",
+  "name": "Alice Player",
+  "phone": "(555) 123-4567",
+  "skill": "Intermediate",
+  "age": "Adult (18+)",
+  "status": "CONFIRMED",
+  "createdAt": "2026-05-20T10:00:00.000Z"
+}
+
+// Collection: waitlists / {waitlistId}
+{
+  "id": "WL-20260527-001",
+  "sessionId": "session_2026-05-27_evening",
+  "sessionDate": "2026-05-27",
+  "sessionType": "evening",
+  "userEmail": "player2@example.com",
+  "name": "Bob Waitlist",
+  "position": 1,
+  "status": "WAITING", // WAITING | PROMOTED | EXPIRED | CANCELLED
+  "createdAt": "2026-05-21T14:30:00.000Z",
+  "promotedAt": null,
+  "promotedBookingId": null
+}</code></pre>
+        </div>
+
+        <!-- Tab 3: Locking & Concurrency -->
+        <div class="db-tab-content" id="db-tab-concurrency">
+          <div class="db-section-desc">
+            <h5>Anti-Race Condition & Concurrency Locking Strategy</h5>
+            <p>Prevents overbooking or duplicate promotions when multiple users attempt to cancel or book simultaneously.</p>
+          </div>
+          <div class="db-diagram-grid">
+            <div class="diagram-card">
+              <h6>1. Pessimistic Row Locking (`SELECT FOR UPDATE SKIP LOCKED`)</h6>
+              <p>In Supabase / PostgreSQL edge functions, acquiring a row lock guarantees isolated transaction boundaries:</p>
+              <pre class="code-snippet"><code>BEGIN;
+-- Lock session row & prevent concurrent slot updates
+SELECT * FROM sessions WHERE id = $1 FOR UPDATE;
+
+-- Select top FIFO candidate with SKIP LOCKED to prevent duplicate claims
+SELECT * FROM waitlist_queue 
+WHERE session_date = $2 AND status = 'WAITING'
+ORDER BY position ASC, created_at ASC
+LIMIT 1 FOR UPDATE SKIP LOCKED;
+
+-- Atomic promotion
+UPDATE waitlist_queue SET status = 'PROMOTED' WHERE id = $3;
+COMMIT;</code></pre>
+            </div>
+
+            <div class="diagram-card">
+              <h6>2. Optimistic Concurrency Control (Version Checks)</h6>
+              <p>For Firestore / HTTP API endpoints, version timestamps ensure zero lost updates:</p>
+              <pre class="code-snippet"><code>// Perform atomic document transaction
+await db.runTransaction(async (transaction) => {
+  const sessionDoc = await transaction.get(sessionRef);
+  if (sessionDoc.data().version !== expectedVersion) {
+    throw new Error("Concurrency conflict. Transaction aborted.");
+  }
+  transaction.update(sessionRef, {
+    confirmedBookingsCount: sessionDoc.data().confirmedBookingsCount - 1,
+    version: sessionDoc.data().version + 1
+  });
+});</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Algorithmic Auto-Promotion Flow -->
+        <div class="db-tab-content" id="db-tab-algorithm">
+          <div class="db-section-desc">
+            <h5>FIFO Queue Algorithmic Auto-Promotion Pipeline</h5>
+            <p>How the system processes cancellation payloads beyond standard CRUD:</p>
+          </div>
+          
+          <div class="algo-flowchart">
+            <div class="algo-step">
+              <span class="step-num">1</span>
+              <div>
+                <strong>Cancellation Event Triggered</strong>
+                <p>User clicks "Cancel Reservation" on full session (e.g. Evening Sunset Smash).</p>
+              </div>
+            </div>
+            <div class="algo-arrow"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="algo-step">
+              <span class="step-num">2</span>
+              <div>
+                <strong>Serverless Edge Function Execution</strong>
+                <p>`handle-cancellation` Edge Function receives payload & acquires DB transaction lock.</p>
+              </div>
+            </div>
+            <div class="algo-arrow"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="algo-step">
+              <span class="step-num">3</span>
+              <div>
+                <strong>FIFO Priority Queue Evaluation</strong>
+                <p>Queries `waitlist_queue` for `status = 'WAITING'` sorted by `position ASC` and `created_at ASC`.</p>
+              </div>
+            </div>
+            <div class="algo-arrow"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="algo-step">
+              <span class="step-num">4</span>
+              <div>
+                <strong>Atomic Status Transition & Slot Re-allocation</strong>
+                <p>Top player status set to `PROMOTED`. Confirmed booking generated (`RP-YYYYMMDD-XXXX`). Remaining queue re-indexed.</p>
+              </div>
+            </div>
+            <div class="algo-arrow"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="algo-step">
+              <span class="step-num">5</span>
+              <div>
+                <strong>Automated Notification & Audit Dispatch</strong>
+                <p>Email alert sent to promoted player. Audit record saved in `promotion_logs`. UI state updated live.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Edge Function Execution Telemetry Console Drawer -->
+  <div class="telemetry-drawer" id="telemetry-drawer">
+    <div class="telemetry-header">
+      <div class="telemetry-title">
+        <span class="telemetry-dot active"></span>
+        <i class="fa-solid fa-terminal"></i>
+        <span>Serverless Edge Function Execution Telemetry Console</span>
+      </div>
+      <div class="telemetry-actions">
+        <button class="telemetry-btn" id="btn-clear-telemetry" title="Clear Logs"><i class="fa-solid fa-trash-can"></i> Clear</button>
+        <button class="telemetry-btn" id="btn-minimize-telemetry" title="Toggle Window"><i class="fa-solid fa-chevron-down"></i></button>
+      </div>
+    </div>
+
+    <div class="telemetry-metrics">
+      <div class="t-metric">
+        <span>Function Runtime</span>
+        <strong id="metric-runtime">Deno / Edge</strong>
+      </div>
+      <div class="t-metric">
+        <span>Executions</span>
+        <strong id="metric-count">0</strong>
+      </div>
+      <div class="t-metric">
+        <span>Auto-Promotions</span>
+        <strong id="metric-promotions">0</strong>
+      </div>
+      <div class="t-metric">
+        <span>Last Latency</span>
+        <strong id="metric-latency">-- ms</strong>
+      </div>
+    </div>
+
+    <div class="telemetry-logs" id="telemetry-log-stream">
+      <div class="telemetry-log-line info">
+        <span class="t-stamp">[INITIALIZED]</span> System ready. Edge Function listener initialized for `handle-cancellation` endpoint.
+      </div>
+    </div>
+  </div>
+
   <!-- Footer -->
   <footer>
     <div class="footer-container">
@@ -631,6 +903,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="email-config.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260716-6"></script>
 </body>
 </html>
