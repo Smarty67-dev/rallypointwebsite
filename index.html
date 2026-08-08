@@ -738,45 +738,6 @@ await db.runTransaction(async (transaction) => {
     </div>
   </div>
 
-  <!-- Live Edge Function Execution Telemetry Console Drawer -->
-  <div class="telemetry-drawer" id="telemetry-drawer">
-    <div class="telemetry-header">
-      <div class="telemetry-title">
-        <span class="telemetry-dot active"></span>
-        <i class="fa-solid fa-terminal"></i>
-        <span>Serverless Edge Function Execution Telemetry Console</span>
-      </div>
-      <div class="telemetry-actions">
-        <button class="telemetry-btn" id="btn-clear-telemetry" title="Clear Logs"><i class="fa-solid fa-trash-can"></i> Clear</button>
-        <button class="telemetry-btn" id="btn-minimize-telemetry" title="Toggle Window"><i class="fa-solid fa-chevron-down"></i></button>
-      </div>
-    </div>
-
-    <div class="telemetry-metrics">
-      <div class="t-metric">
-        <span>Function Runtime</span>
-        <strong id="metric-runtime">Deno / Edge</strong>
-      </div>
-      <div class="t-metric">
-        <span>Executions</span>
-        <strong id="metric-count">0</strong>
-      </div>
-      <div class="t-metric">
-        <span>Auto-Promotions</span>
-        <strong id="metric-promotions">0</strong>
-      </div>
-      <div class="t-metric">
-        <span>Last Latency</span>
-        <strong id="metric-latency">-- ms</strong>
-      </div>
-    </div>
-
-    <div class="telemetry-logs" id="telemetry-log-stream">
-      <div class="telemetry-log-line info">
-        <span class="t-stamp">[INITIALIZED]</span> System ready. Edge Function listener initialized for `handle-cancellation` endpoint.
-      </div>
-    </div>
-  </div>
 
   <!-- Footer -->
   <footer>

@@ -179,39 +179,6 @@ function initDbModalAndTelemetry() {
     });
   });
 
-  // Telemetry Console Toggle & Actions
-  const telemetryDrawer = document.getElementById('telemetry-drawer');
-  const btnToggleTelemetry = document.getElementById('btn-toggle-telemetry');
-  const btnMinimizeTelemetry = document.getElementById('btn-minimize-telemetry');
-  const btnClearTelemetry = document.getElementById('btn-clear-telemetry');
-
-  if (btnToggleTelemetry && telemetryDrawer) {
-    btnToggleTelemetry.addEventListener('click', () => {
-      telemetryDrawer.classList.toggle('minimized');
-    });
-  }
-
-  if (btnMinimizeTelemetry && telemetryDrawer) {
-    btnMinimizeTelemetry.addEventListener('click', (e) => {
-      e.stopPropagation();
-      telemetryDrawer.classList.add('minimized');
-    });
-  }
-
-  if (btnClearTelemetry) {
-    btnClearTelemetry.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const logStream = document.getElementById('telemetry-log-stream');
-      if (logStream) {
-        logStream.innerHTML = `
-          <div class="telemetry-log-line info">
-            <span class="t-stamp">[CLEARED]</span> Log stream cleared. Edge Function execution listener active.
-          </div>
-        `;
-      }
-    });
-  }
-
   // Quick Seed Full Session Demo Button
   const btnSeed = document.getElementById('btn-seed-full-session');
   if (btnSeed) {
@@ -224,36 +191,11 @@ let telemetryExecutionCount = 0;
 let telemetryPromotionCount = 0;
 
 function logEdgeTelemetry(message, type = 'info') {
-  const logStream = document.getElementById('telemetry-log-stream');
-  const telemetryDrawer = document.getElementById('telemetry-drawer');
-  if (telemetryDrawer && telemetryDrawer.classList.contains('minimized')) {
-    telemetryDrawer.classList.remove('minimized');
-  }
-
-  if (!logStream) return;
-
-  const now = new Date();
-  const stamp = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
-
-  const line = document.createElement('div');
-  line.className = `telemetry-log-line ${type}`;
-  line.innerHTML = `<span class="t-stamp">[${stamp}]</span> ${escapeHTML(message)}`;
-
-  logStream.appendChild(line);
-  logStream.scrollTop = logStream.scrollHeight;
+  // telemetry logging removed
 }
 
 function updateTelemetryMetrics(latencyMs = 24, isPromotion = false) {
-  telemetryExecutionCount++;
-  if (isPromotion) telemetryPromotionCount++;
-
-  const elCount = document.getElementById('metric-count');
-  const elPromotions = document.getElementById('metric-promotions');
-  const elLatency = document.getElementById('metric-latency');
-
-  if (elCount) elCount.textContent = String(telemetryExecutionCount);
-  if (elPromotions) elPromotions.textContent = String(telemetryPromotionCount);
-  if (elLatency) elLatency.textContent = `${latencyMs} ms`;
+  // telemetry metrics removed
 }
 
 // --- NAVIGATION ---
