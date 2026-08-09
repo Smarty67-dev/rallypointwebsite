@@ -95,8 +95,26 @@ const elements = {
   signupName: document.getElementById('signup-name'),
   signupEmail: document.getElementById('signup-email'),
   signupPhone: document.getElementById('signup-phone'),
-  signupPass: document.getElementById('signup-password')
+  signupPass: document.getElementById('signup-password'),
+  // Forgot password elements
+  forgotPasswordLink: document.getElementById('forgot-password-link'),
+  sheetForgot: document.getElementById('sheet-forgot'),
+  forgotContact: document.getElementById('forgot-contact'),
+  forgotContactLabel: document.getElementById('forgot-contact-label'),
+  btnSendCode: document.getElementById('btn-send-code'),
+  forgotStepVerify: document.getElementById('forgot-step-verify'),
+  forgotCode: document.getElementById('forgot-code'),
+  btnVerifyCode: document.getElementById('btn-verify-code'),
+  btnResendCode: document.getElementById('btn-resend-code'),
+  forgotStepReset: document.getElementById('forgot-step-reset'),
+  forgotNewPassword: document.getElementById('forgot-new-password'),
+  btnSetNewPassword: document.getElementById('btn-set-new-password')
 };
+
+// Ensure a fallback `showToast` exists to avoid runtime errors in environments
+if (typeof window.showToast !== 'function') {
+  window.showToast = function(msg, type) { console.log(type || 'info', msg); };
+}
 
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -263,6 +281,12 @@ function initAuth() {
   elements.tabLogin.addEventListener('click', () => switchAuthTab('login'));
   elements.tabSignup.addEventListener('click', () => switchAuthTab('signup'));
 
+  // ensure forgot link visibility matches the currently active tab (default hidden)
+  if (elements.forgotPasswordLink) {
+    const loginActive = elements.tabLogin && elements.tabLogin.classList.contains('active');
+    elements.forgotPasswordLink.style.display = loginActive ? 'inline' : 'none';
+  }
+
   elements.loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     handleLogin();
@@ -272,10 +296,188 @@ function initAuth() {
     e.preventDefault();
     handleSignup();
   });
+  // initialize forgot-password handlers
+  initForgotPassword();
+}
+
+// --- FORGOT PASSWORD FLOW ---
+function initForgotPassword() {
+  if (!elements.forgotPasswordLink) return;
+  elements.forgotPasswordLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    openAuthModal('forgot');
+    // initialize forgot sheet visible state
+    if (elements.sheetForgot) elements.sheetForgot.style.display = 'block';
+    if (elements.forgotStepVerify) elements.forgotStepVerify.style.display = 'none';
+    if (elements.forgotStepReset) elements.forgotStepReset.style.display = 'none';
+    if (elements.forgotContact) elements.forgotContact.value = '';
+    if (elements.forgotContactLabel) elements.forgotContactLabel.textContent = 'Email Address';
+  });
+
+  if (elements.btnSendCode) elements.btnSendCode.addEventListener('click', (e) => { e.preventDefault(); handleSendVerificationCode(); });
+  if (elements.btnVerifyCode) elements.btnVerifyCode.addEventListener('click', (e) => { e.preventDefault(); handleVerifyCode(); });
+  if (elements.btnResendCode) elements.btnResendCode.addEventListener('click', (e) => { e.preventDefault(); handleResendCode(); });
+  if (elements.btnSetNewPassword) elements.btnSetNewPassword.addEventListener('click', (e) => { e.preventDefault(); handleSetNewPassword(); });
+}
+
+
+
+function handleSendVerificationCode() {
+  const contact = elements.forgotContact?.value.trim().toLowerCase();
+  if (!contact) { showToast('Please provide an email to receive the code.', 'error'); return; }
+
+  // check user exists
+  const users = getUsersFromStorage();
+  const user = users.find(u => u.email === contact);
+  if (!user) {
+    showToast('No account found for that contact.', 'error');
+    return;
+  }
+
+  const method = 'email';
+  const existingCodes = getVerificationCodesFromStorage();
+  const previousRecord = existingCodes.find(c => c.contact === contact && c.method === method);
+  const code = generateVerificationCode(previousRecord?.code);
+  const expiresAt = Date.now() + (15 * 60 * 1000); // 15 minutes
+  const record = { contact, method, code, expiresAt };
+  const codes = getVerificationCodesFromStorage().filter(c => !(c.contact === contact && c.method === method));
+  codes.push(record);
+  saveVerificationCodesToStorage(codes);
+  // Attempt to send via EmailJS REST API if configured (email only)
+  const cfg = window.RALLY_EMAIL_CONFIG || {};
+  function safeToast(msg, type) { if (typeof showToast === 'function') try { showToast(msg, type); } catch(e){ console.log(msg); } else { console.log(type||'info', msg); } }
+  function loadEmailJsSdk() {
+    return new Promise((resolve, reject) => {
+      if (window.emailjs) {
+        return resolve(window.emailjs);
+      }
+      const existing = document.getElementById('emailjs-sdk-script');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.emailjs));
+        existing.addEventListener('error', () => reject(new Error('EmailJS SDK failed to load.')));
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = 'emailjs-sdk-script';
+      script.src = 'email.min.js';
+      script.onload = () => resolve(window.emailjs);
+      script.onerror = () => reject(new Error('EmailJS SDK failed to load.'));
+      document.head.appendChild(script);
+    });
+  }
+  function sendEmailJsCode() {
+    return loadEmailJsSdk().then((emailjs) => {
+      if (typeof emailjs.init === 'function') {
+        emailjs.init(cfg.emailjsPublicKey);
+      }
+      const params = {
+        user_email: contact,
+        user_name: user.name || contact,
+        verification_code: code,
+        contact: contact,
+        name: user.name || contact,
+        to_email: contact,
+        to_name: user.name || contact
+      };
+      return emailjs.send(cfg.emailjsServiceId, cfg.emailjsTemplateId, params);
+    });
+  }
+  if (method === 'email' && cfg.emailjsServiceId && cfg.emailjsTemplateId && cfg.emailjsPublicKey) {
+    sendEmailJsCode()
+      .then(() => safeToast(`Verification code sent to ${contact}.`, 'success'))
+      .catch((err) => {
+        safeToast(`Could not send email. Code displayed in console (demo).`, 'warning');
+        console.warn('EmailJS browser SDK send error', err);
+      });
+  } else {
+    if (method === 'email') {
+      safeToast(`Verification code sent to ${contact} (demo).`, 'success');
+    } else {
+      safeToast(`Verification code sent to ${contact} via SMS (demo).`, 'success');
+    }
+    console.info('Demo verification code for', contact, 'is', code);
+  }
+
+  // Reveal verify step and hide initial inputs to present a dedicated entry view
+  if (elements.sheetForgot) elements.sheetForgot.style.display = 'block';
+  if (elements.forgotStepVerify) elements.forgotStepVerify.style.display = 'block';
+  if (elements.forgotStepReset) elements.forgotStepReset.style.display = 'none';
+  if (elements.forgotContact) elements.forgotContact.disabled = true;
+  if (elements.btnSendCode) elements.btnSendCode.style.display = 'none';
+  if (elements.btnResendCode) elements.btnResendCode.style.display = 'inline-block';
+  if (elements.forgotCode) {
+    elements.forgotCode.value = '';
+    elements.forgotCode.focus();
+  }
+}
+
+function handleVerifyCode() {
+  const code = elements.forgotCode.value.trim();
+  const method = 'email';
+  const contact = elements.forgotContact?.value.trim().toLowerCase();
+  if (!code) { showToast('Please enter the verification code.', 'error'); return; }
+
+  const codes = getVerificationCodesFromStorage();
+  const record = codes.find(c => c.contact === contact && c.method === method && c.code === code);
+  if (!record) { showToast('Code does not match. You can resend a new code.', 'error'); return; }
+  if (Date.now() > record.expiresAt) { showToast('Code expired. Please resend a new code.', 'error'); return; }
+
+  // Verified - show reset password step
+  if (elements.forgotStepReset) elements.forgotStepReset.style.display = 'block';
+  const resetNote = document.getElementById('forgot-reset-note');
+  if (resetNote) resetNote.style.display = 'block';
+  showToast('Code verified. Set your new password.', 'success');
+}
+
+function handleResendCode() {
+  const contact = elements.forgotContact?.value.trim().toLowerCase();
+  if (!contact) { showToast('Please provide email to resend code.', 'error'); return; }
+  // simply call send again
+  handleSendVerificationCode();
+}
+
+function handleSetNewPassword() {
+  const newPass = elements.forgotNewPassword.value;
+  const contact = elements.forgotContact?.value.trim().toLowerCase();
+  if (!newPass) { showToast('Please enter a new password.', 'error'); return; }
+
+  const users = getUsersFromStorage();
+  const idx = users.findIndex(u => u.email === contact);
+  if (idx === -1) { showToast('Account not found.', 'error'); return; }
+  users[idx].password = newPass;
+  saveUsersToStorage(users);
+  showToast('Password updated. You can now log in.', 'success');
+  // clear verification codes for contact
+  const codes = getVerificationCodesFromStorage().filter(c => !(c.contact === contact && c.method === 'email'));
+  saveVerificationCodesToStorage(codes);
+  // close modal
+  closeAuthModal();
+}
+
+// Verification code storage helpers
+function getVerificationCodesFromStorage() {
+  try { return JSON.parse(localStorage.getItem('rally_verification_codes') || '[]'); } catch (e) { return []; }
+}
+function saveVerificationCodesToStorage(arr) { localStorage.setItem('rally_verification_codes', JSON.stringify(arr || [])); }
+function generateVerificationCode(previousCode) {
+  let code;
+  do {
+    code = String(Math.floor(100000 + Math.random() * 900000));
+  } while (previousCode && code === previousCode);
+  return code;
 }
 
 function openAuthModal(tab = 'login') {
-  switchAuthTab(tab);
+  if (tab === 'forgot') {
+    elements.tabLogin.classList.remove('active');
+    elements.tabSignup.classList.remove('active');
+    elements.sheetLogin.classList.remove('active');
+    elements.sheetSignup.classList.remove('active');
+    if (elements.sheetForgot) elements.sheetForgot.style.display = 'block';
+  } else {
+    switchAuthTab(tab);
+    if (elements.sheetForgot) elements.sheetForgot.style.display = 'none';
+  }
   elements.authModalWrapper.classList.add('active');
   document.body.style.overflow = 'hidden';
 }
@@ -297,6 +499,11 @@ function switchAuthTab(tab) {
     elements.sheetSignup.classList.add('active');
     elements.sheetLogin.classList.remove('active');
   }
+  // show forgot-password link only on the login tab
+  const forgotLinkEl = document.getElementById('forgot-password-link');
+  if (forgotLinkEl) forgotLinkEl.style.display = (tab === 'login') ? 'inline' : 'none';
+  const sheetForgotEl = document.getElementById('sheet-forgot');
+  if (sheetForgotEl) sheetForgotEl.style.display = 'none';
 }
 
 function handleLogin() {
@@ -307,8 +514,8 @@ function handleLogin() {
   const user = users.find(u => u.email === email && u.password === pass);
 
   if (user) {
-    setCurrentUserSession(user);
     closeAuthModal();
+    setCurrentUserSession(user);
     showToast(`Welcome back, ${user.name}!`, "success");
     elements.loginForm.reset();
   } else {
@@ -342,8 +549,8 @@ function handleSignup() {
   users.push(newUser);
   saveUsersToStorage(users);
 
-  setCurrentUserSession(newUser);
   closeAuthModal();
+  setCurrentUserSession(newUser);
   showToast(`Account created! Welcome to RallyPoint, ${name}.`, "success");
   elements.signupForm.reset();
 }
@@ -377,7 +584,7 @@ function updateAuthUI() {
         ${isDirector ? '<span class="director-pill">Director</span>' : ''}
         <i class="fa-solid fa-chevron-down" style="font-size: 0.75rem; margin-left: 0.2rem; opacity: 0.7;"></i>
       </div>
-      <div class="user-dropdown-menu" id="user-dropdown">
+      <div class="user-dropdown-menu" id="user-dropdown" style="display:none;">
         <div class="user-dropdown-header">
           <strong>${escapeHTML(state.currentUser.name)}</strong>
           <span>${escapeHTML(state.currentUser.email)}</span>
@@ -396,9 +603,13 @@ function updateAuthUI() {
       badge.addEventListener('click', (e) => {
         e.stopPropagation();
         dropdown.classList.toggle('active');
+        dropdown.style.display = dropdown.classList.contains('active') ? 'block' : 'none';
       });
 
-      document.addEventListener('click', () => dropdown.classList.remove('active'));
+      document.addEventListener('click', () => {
+        dropdown.classList.remove('active');
+        dropdown.style.display = 'none';
+      });
     }
 
     const logoutBtn = document.getElementById('btn-logout');
@@ -438,6 +649,21 @@ function getInitials(name) {
   const parts = name.trim().split(' ');
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   return parts[0].substring(0, 2).toUpperCase();
+}
+
+// Ensure a lightweight refresh helper exists for the My Reservations view
+function refreshMyBookingsView() {
+  try {
+    // If there is a dedicated render for the user's bookings, call it; otherwise use placeholder
+    if (typeof renderMyBookings === 'function') {
+      renderMyBookings();
+    } else {
+      renderBookingsPlaceholder();
+    }
+  } catch (e) {
+    // swallow errors to avoid breaking auth flow
+    console.warn('refreshMyBookingsView error', e);
+  }
 }
 
 // --- CALENDAR ENGINE ---
