@@ -366,7 +366,7 @@ function handleSendVerificationCode() {
   const codes = getVerificationCodesFromStorage().filter(c => !(c.contact === contact && c.method === method));
   codes.push(record);
   saveVerificationCodesToStorage(codes);
-  // Attempt to send via EmailJS REST API if configured (email only)
+  // Attempt to send via EmailJS if configured (email only)
   const cfg = window.RALLY_EMAIL_CONFIG || {};
   function safeToast(msg, type) { if (typeof showToast === 'function') try { showToast(msg, type); } catch(e){ console.log(msg); } else { console.log(type||'info', msg); } }
   function loadEmailJsSdk() {
@@ -388,29 +388,55 @@ function handleSendVerificationCode() {
       document.head.appendChild(script);
     });
   }
-  function sendEmailJsCode() {
+  function sendEmailJsCode(params) {
     return loadEmailJsSdk().then((emailjs) => {
+      if (!emailjs || typeof emailjs.send !== 'function') {
+        return Promise.reject(new Error('EmailJS SDK not available.'));
+      }
       if (typeof emailjs.init === 'function') {
         emailjs.init(cfg.emailjsPublicKey);
       }
-      const params = {
-        user_email: contact,
-        user_name: user.name || contact,
-        verification_code: code,
-        contact: contact,
-        name: user.name || contact,
-        to_email: contact,
-        to_name: user.name || contact
-      };
       return emailjs.send(cfg.emailjsServiceId, cfg.emailjsTemplateId, params);
     });
   }
+  function sendEmailJsRest(params) {
+    return fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_id: cfg.emailjsServiceId,
+        template_id: cfg.emailjsTemplateId,
+        publicKey: cfg.emailjsPublicKey,
+        template_params: params
+      })
+    }).then((response) => {
+      if (!response.ok) {
+        return response.text().then(text => {
+          throw new Error(`EmailJS REST send failed: ${response.status} ${response.statusText} - ${text}`);
+        });
+      }
+      return response.text().then(text => ({ status: 'ok', text }));
+    });
+  }
+  const params = {
+    user_email: contact,
+    user_name: user.name || contact,
+    verification_code: code,
+    contact: contact,
+    name: user.name || contact,
+    to_email: contact,
+    to_name: user.name || contact
+  };
   if (method === 'email' && cfg.emailjsServiceId && cfg.emailjsTemplateId && cfg.emailjsPublicKey) {
-    sendEmailJsCode()
+    sendEmailJsCode(params)
+      .catch((err) => {
+        console.warn('EmailJS SDK send failed, falling back to REST API.', err);
+        return sendEmailJsRest(params);
+      })
       .then(() => safeToast(`Verification code sent to ${contact}.`, 'success'))
       .catch((err) => {
         safeToast(`Could not send email. Code displayed in console (demo).`, 'warning');
-        console.warn('EmailJS browser SDK send error', err);
+        console.error('EmailJS send error', err);
       });
   } else {
     if (method === 'email') {
