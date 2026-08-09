@@ -111,9 +111,32 @@ const elements = {
   btnSetNewPassword: document.getElementById('btn-set-new-password')
 };
 
-// Ensure a fallback `showToast` exists to avoid runtime errors in environments
-if (typeof window.showToast !== 'function') {
-  window.showToast = function(msg, type) { console.log(type || 'info', msg); };
+// Toast helper
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) {
+    console.log(type || 'info', msg);
+    return;
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '!' : 'i'}</span>
+    <span class="toast-message">${msg}</span>
+    <button class="toast-close" aria-label="Dismiss notification">×</button>
+  `;
+
+  const closeButton = toast.querySelector('.toast-close');
+  closeButton.addEventListener('click', () => {
+    toast.remove();
+  });
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 5000);
 }
 
 // --- INITIALIZATION ---
@@ -330,7 +353,7 @@ function handleSendVerificationCode() {
   const users = getUsersFromStorage();
   const user = users.find(u => u.email === contact);
   if (!user) {
-    showToast('No account found for that contact.', 'error');
+    showToast('This Gmail was never registered before. Please sign up first.', 'error');
     return;
   }
 
@@ -419,7 +442,7 @@ function handleVerifyCode() {
 
   const codes = getVerificationCodesFromStorage();
   const record = codes.find(c => c.contact === contact && c.method === method && c.code === code);
-  if (!record) { showToast('Code does not match. You can resend a new code.', 'error'); return; }
+  if (!record) { showToast('Wrong verification code. Please check your email and try again.', 'error'); return; }
   if (Date.now() > record.expiresAt) { showToast('Code expired. Please resend a new code.', 'error'); return; }
 
   // Verified - show reset password step
