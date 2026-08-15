@@ -169,9 +169,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Check active session (loads bookings if already logged in)
   checkSession();
+  // Ensure bookings placeholder is accurate after session restore
   if (!state.currentUser) {
     renderBookingsPlaceholder();
   }
+
+  // Listen for storage events (other tabs) to keep auth UI in sync
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'rally_current_user') {
+      try {
+        state.currentUser = e.newValue ? JSON.parse(e.newValue) : null;
+      } catch (err) {
+        state.currentUser = null;
+      }
+      updateAuthUI();
+    }
+  });
+
+  // Debug: log whether a persisted user exists (helps diagnose reload logout)
+  try { console.debug('RALLY: persisted user on load=', localStorage.getItem('rally_current_user')); } catch (e) {}
 
   initDbModalAndTelemetry();
 });
@@ -293,6 +309,41 @@ function isAdminRouteActive() {
 
 function isDirectorUser(user = state.currentUser) {
   return Boolean(user && ADMIN_EMAILS.includes(user.email));
+}
+
+function renderAdminRoute() {
+  try {
+    const adminSection = document.getElementById('admin');
+    const accessPanel = elements.adminAccessPanel;
+    const dashboard = elements.adminDashboard;
+    if (!adminSection || !accessPanel || !dashboard) return;
+
+    if (isAdminRouteActive()) {
+      adminSection.style.display = 'block';
+      if (isDirectorUser()) {
+        accessPanel.style.display = 'none';
+        dashboard.style.display = 'block';
+        try { renderAdminRoster(); } catch (e) { console.error('renderAdminRoster failed', e); }
+      } else {
+        accessPanel.style.display = 'block';
+        dashboard.style.display = 'none';
+        accessPanel.innerHTML = `
+          <div style="padding:1.2rem; text-align:center;">
+            <p><strong>Director access required</strong></p>
+            <p>Please sign in with a director account to view the roster.</p>
+            <div style="margin-top:0.8rem;"><button class="btn btn-volt" id="btn-admin-login">Sign in</button></div>
+          </div>
+        `;
+        const btn = document.getElementById('btn-admin-login');
+        if (btn) btn.addEventListener('click', () => openAuthModal('login'));
+      }
+      adminSection.setAttribute('aria-hidden', isDirectorUser() ? 'false' : 'true');
+    } else {
+      adminSection.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('renderAdminRoute error', err);
+  }
 }
 
 // --- USER AUTHENTICATION ENGINE ---
@@ -624,7 +675,8 @@ function checkSession() {
 }
 
 function updateAuthUI() {
-  if (state.currentUser) {
+  try {
+    if (state.currentUser) {
     const isDirector = isDirectorUser();
     elements.navAuthContainer.innerHTML = `
       <div class="user-badge" id="user-profile-badge">
@@ -671,15 +723,18 @@ function updateAuthUI() {
     if (elements.bookerPhone) elements.bookerPhone.value = state.currentUser.phone || '';
 
     refreshMyBookingsView();
-  } else {
+    } else {
     elements.navAuthContainer.innerHTML = `
       <button class="btn btn-volt btn-nav-auth" id="btn-nav-login">Login / Signup</button>
     `;
     document.getElementById('btn-nav-login').addEventListener('click', () => openAuthModal('login'));
     renderBookingsPlaceholder();
+    }
+  } catch (err) {
+    console.error('updateAuthUI error', err);
   }
 
-  renderAdminRoute();
+  try { renderAdminRoute(); } catch (e) { console.error('renderAdminRoute error', e); }
 }
 
 function handleLogout() {
@@ -1263,6 +1318,32 @@ function saveWaitlistsToStorage(waitlists) {
 }
 
 // --- SEARCH & MY BOOKINGS VIEW ---
+function initLookup() {
+  try {
+    if (!elements.lookupEmail || !elements.btnLookupSearch) return;
+
+    // Enable/disable based on signed-in state
+    elements.lookupEmail.disabled = !state.currentUser;
+    elements.btnLookupSearch.disabled = !state.currentUser;
+
+    elements.btnLookupSearch.addEventListener('click', (e) => {
+      e.preventDefault();
+      const email = elements.lookupEmail.value.trim();
+      searchBookings(email);
+    });
+
+    elements.lookupEmail.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const email = elements.lookupEmail.value.trim();
+        searchBookings(email);
+      }
+    });
+  } catch (err) {
+    console.error('initLookup error', err);
+  }
+}
+
 function searchBookings(email) {
   const signedInEmail = state.currentUser ? state.currentUser.email.trim().toLowerCase() : '';
   const lookupEmail = (email || '').trim().toLowerCase();
@@ -1538,15 +1619,77 @@ function saveUsersToStorage(users) {
 }
 
 function hasFirestoreBackend() {
-  return false;
+  return Boolean(window.__rally_db);
 }
 
-function initBookingBackend() { return Promise.resolve(); }
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => resolve();
+    s.onerror = (e) => reject(new Error('Failed to load ' + url));
+    document.head.appendChild(s);
+  });
+}
+
+async function initBookingBackend() {
+  const cfg = window.RALLY_EMAIL_CONFIG?.firebaseConfig;
+  if (!cfg) return Promise.resolve();
+  if (window.__rally_db) return Promise.resolve();
+
+  try {
+    // Load Firebase compat SDKs so code runs in browsers without bundlers
+    await loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js');
+    await loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js');
+
+    if (!window.firebase || !window.firebase.initializeApp) {
+      console.warn('Firebase SDK loaded but not available.');
+      return Promise.resolve();
+    }
+
+    try { window.firebase.initializeApp(cfg); } catch (e) { /* already initialized might throw */ }
+    window.__rally_db = window.firebase.firestore();
+
+    // Pull remote collections into localStorage so the app can continue using existing local helpers
+    try {
+      const bookingsSnap = await window.__rally_db.collection('bookings').get();
+      const bookings = bookingsSnap.docs.map(d => d.data());
+      localStorage.setItem('rally_point_bookings', JSON.stringify(bookings || []));
+
+      const usersSnap = await window.__rally_db.collection('users').get();
+      const users = usersSnap.docs.map(d => d.data());
+      localStorage.setItem('rally_users', JSON.stringify(users || []));
+
+      const waitlistsSnap = await window.__rally_db.collection('waitlists').get();
+      const waitlists = waitlistsSnap.docs.map(d => d.data());
+      localStorage.setItem('rally_point_waitlists', JSON.stringify(waitlists || []));
+
+      console.info('Firebase sync: loaded', bookings.length || 0, 'bookings,', users.length || 0, 'users');
+    } catch (err) {
+      console.warn('Firebase: failed to mirror collections to localStorage', err);
+    }
+
+    return Promise.resolve();
+  } catch (err) {
+    console.warn('initBookingBackend error', err);
+    return Promise.resolve();
+  }
+}
+
 function hasBookingResetBeenApplied() { return Promise.resolve(false); }
 function markBookingResetAsApplied() { return Promise.resolve(); }
 function resetAllBookings() { return Promise.resolve(true); }
-function saveBookingToBackend(b) { return Promise.resolve(); }
-function deleteBookingFromBackend(b) { return Promise.resolve(); }
+function saveBookingToBackend(b) {
+  if (!hasFirestoreBackend()) return Promise.resolve();
+  try {
+    const col = window.__rally_db.collection('bookings');
+    return col.doc(b.id).set(b);
+  } catch (e) { return Promise.resolve(); }
+}
+function deleteBookingFromBackend(b) {
+  if (!hasFirestoreBackend()) return Promise.resolve();
+  try { return window.__rally_db.collection('bookings').doc(b.id).delete(); } catch (e) { return Promise.resolve(); }
+}
 function dispatchBookingEmailAlert(b) { return Promise.resolve({ sent: true, via: 'Mock' }); }
 function dispatchBookingCancellationAlert(b) { return Promise.resolve({ sent: true, via: 'Mock' }); }
 function getBookingContactDetails() {
