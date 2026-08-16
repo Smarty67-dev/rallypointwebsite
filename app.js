@@ -634,7 +634,8 @@ function handleLogin() {
         if (localUser) {
           closeAuthModal();
           setCurrentUserSession(localUser);
-          showToast('Signed in using local account (no remote profile).', 'warning');
+          // Show a neutral info toast instead of a warning
+          showToast('Signed in (local account). Remote sync not configured.', 'info');
           elements.loginForm.reset();
           return;
         }
