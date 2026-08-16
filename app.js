@@ -628,6 +628,16 @@ function handleLogin() {
       })
       .catch((err) => {
         console.warn('Firebase login error', err);
+        // Fallback: check localStorage users in case account exists only locally
+        const users = getUsersFromStorage();
+        const localUser = users.find(u => u.email === email && u.password === pass);
+        if (localUser) {
+          closeAuthModal();
+          setCurrentUserSession(localUser);
+          showToast('Signed in using local account (no remote profile).', 'warning');
+          elements.loginForm.reset();
+          return;
+        }
         showToast('Invalid email or password.', 'error');
       });
     return;
