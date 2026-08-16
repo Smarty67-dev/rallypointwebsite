@@ -150,8 +150,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   initAdminRoute();
 
   await initBookingBackend();
-  // Add Firebase migration UI if Firebase is available
-  try { addFirebaseMigrationUI(); } catch (e) { console.warn('addFirebaseMigrationUI error', e); }
 
   const shouldReset = window.RALLY_EMAIL_CONFIG?.resetBookingsOnLoad && !(await hasBookingResetBeenApplied());
   if (shouldReset) {
@@ -824,97 +822,7 @@ function getInitials(name) {
   return parts[0].substring(0, 2).toUpperCase();
 }
 
-// --- Firebase Migration UI & Helpers ---
-function addFirebaseMigrationUI() {
-  if (!hasFirestoreBackend()) return;
-  const header = document.getElementById('main-header');
-  if (!header) return;
-  // avoid duplicate banner
-  if (document.getElementById('firebase-migration-banner')) return;
 
-  const cfg = window.RALLY_EMAIL_CONFIG?.firebaseConfig || {};
-  const projectId = cfg.projectId || '';
-  const consoleUrl = projectId ? `https://console.firebase.google.com/project/${projectId}/authentication/providers` : 'https://console.firebase.google.com/';
-
-  const banner = document.createElement('div');
-  banner.id = 'firebase-migration-banner';
-  banner.style.cssText = 'background:#fffae6;color:#111;padding:0.6rem;display:flex;gap:0.6rem;align-items:center;justify-content:space-between;font-size:0.95rem;border-bottom:1px solid rgba(0,0,0,0.04);';
-  banner.innerHTML = `
-    <div style="display:flex;gap:0.6rem;align-items:center;">
-      <strong style="color:#6a4">Firebase available</strong>
-      <span style="opacity:0.85;">Enable Email/Password sign-in in Firebase Console or migrate your local accounts.</span>
-    </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;">
-      <a class="btn btn-sm" href="${consoleUrl}" target="_blank" rel="noopener noreferrer" style="background:#fff;color:#111;border:1px solid rgba(0,0,0,0.06);">Open Firebase Console</a>
-      <button class="btn btn-sm btn-volt" id="btn-migrate-local-users">Migrate local users</button>
-      <button class="btn btn-sm" id="btn-dismiss-migration" aria-label="Dismiss">✕</button>
-    </div>
-  `;
-
-  header.parentNode.insertBefore(banner, header.nextSibling);
-
-  const btn = document.getElementById('btn-migrate-local-users');
-  if (btn) btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    btn.textContent = 'Migrating...';
-    try {
-      const res = await migrateLocalUsersToFirebase();
-      showToast(`Migration complete: ${res.success} migrated, ${res.skipped} skipped, ${res.failed} failed.`, 'success');
-    } catch (e) {
-      console.error('Migration error', e);
-      showToast('Migration failed. See console for details.', 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Migrate local users';
-    }
-  });
-
-  const dismiss = document.getElementById('btn-dismiss-migration');
-  if (dismiss) dismiss.addEventListener('click', () => { banner.remove(); });
-}
-
-async function migrateLocalUsersToFirebase() {
-  if (!hasFirestoreBackend() || !window.firebase || !window.firebase.auth) throw new Error('Firebase not initialized');
-  const users = getUsersFromStorage();
-  if (!users || users.length === 0) return { success: 0, skipped: 0, failed: 0 };
-
-  let success = 0, failed = 0, skipped = 0;
-
-  for (const u of users) {
-    try {
-      // Try creating user
-      const cred = await window.firebase.auth().createUserWithEmailAndPassword(u.email, u.password).catch(err => { throw err; });
-      const uid = cred.user.uid;
-      const profile = { name: u.name || '', email: u.email, phone: u.phone || '', uid };
-      try { await window.__rally_db.collection('users').doc(uid).set(profile); } catch (e) { console.warn('Could not save profile for', u.email, e); }
-      success++;
-    } catch (err) {
-      // If account exists, try to sign in and then set profile
-      if (err && err.code === 'auth/email-already-in-use') {
-        try {
-          const sign = await window.firebase.auth().signInWithEmailAndPassword(u.email, u.password);
-          const uid = sign.user.uid;
-          const profile = { name: u.name || '', email: u.email, phone: u.phone || '', uid };
-          try { await window.__rally_db.collection('users').doc(uid).set(profile); } catch (e) { console.warn('Could not save profile for', u.email, e); }
-          skipped++;
-        } catch (e2) {
-          failed++;
-          console.warn('Failed to sign in existing account for', u.email, e2);
-        }
-      } else {
-        failed++;
-        console.warn('Failed to create account for', u.email, err);
-      }
-    }
-    // Small delay to avoid hitting rapid-create limits
-    await new Promise(r => setTimeout(r, 300));
-  }
-
-  // Sign out after migration to avoid leaving credentials in the client
-  try { await window.firebase.auth().signOut(); } catch (e) {}
-
-  return { success, skipped, failed };
-}
 
 // Ensure a lightweight refresh helper exists for the My Reservations view
 function refreshMyBookingsView() {
