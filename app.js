@@ -1690,7 +1690,22 @@ function loadScript(url) {
 }
 
 async function initBookingBackend() {
-  const cfg = window.RALLY_EMAIL_CONFIG?.firebaseConfig;
+  let cfg = window.RALLY_EMAIL_CONFIG?.firebaseConfig;
+  // If no client config exists, try fetching the runtime config from /api/config (Vercel env vars)
+  if (!cfg) {
+    try {
+      const resp = await fetch('/api/config');
+      if (resp && resp.ok) {
+        const serverCfg = await resp.json();
+        if (!window.RALLY_EMAIL_CONFIG) window.RALLY_EMAIL_CONFIG = {};
+        // merge server config into window.RALLY_EMAIL_CONFIG but keep any client values
+        window.RALLY_EMAIL_CONFIG = Object.assign({}, window.RALLY_EMAIL_CONFIG, serverCfg);
+        cfg = window.RALLY_EMAIL_CONFIG.firebaseConfig;
+      }
+    } catch (e) {
+      // ignore fetch errors and fall back to client config
+    }
+  }
   if (!cfg) return Promise.resolve();
   if (window.__rally_db) return Promise.resolve();
 
