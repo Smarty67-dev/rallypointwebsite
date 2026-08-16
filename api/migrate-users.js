@@ -57,7 +57,8 @@ module.exports = async (req, res) => {
         headerProvided: !!auth,
         headerTokenLength: headerToken ? headerToken.length : null,
         bodyType,
-        bodyLength
+        bodyLength,
+        firebaseServiceAccountPresent: !!process.env.FIREBASE_SERVICE_ACCOUNT
       });
     }
   } catch (e) { /* no-op debug failure */ }
