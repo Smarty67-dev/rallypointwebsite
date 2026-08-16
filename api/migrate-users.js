@@ -23,6 +23,16 @@ function initAdmin() {
 }
 
 module.exports = async (req, res) => {
+  try {
+    console.log('[migrate-users] invoked', {
+      method: req.method,
+      url: req.url,
+      contentType: req.headers['content-type'] || null,
+      contentLength: req.headers['content-length'] || null,
+      migrateSecretPresent: !!process.env.MIGRATE_SECRET,
+      firebaseServiceAccountPresent: !!process.env.FIREBASE_SERVICE_ACCOUNT
+    });
+  } catch (e) { /* safe logging should never throw */ }
   if (req.method !== 'POST') return res.status(405).end('Method Not Allowed');
 
   const auth = req.headers.authorization || '';
