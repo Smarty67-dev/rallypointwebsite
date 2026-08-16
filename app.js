@@ -1759,19 +1759,26 @@ async function initBookingBackend() {
 
     // Pull remote collections into localStorage so the app can continue using existing local helpers
     try {
-      const bookingsSnap = await window.__rally_db.collection('bookings').get();
-      const bookings = bookingsSnap.docs.map(d => d.data());
-      localStorage.setItem('rally_point_bookings', JSON.stringify(bookings || []));
+      // Only mirror collections if rules allow public read or user is signed in
+      const authAvailable = window.firebase && window.firebase.auth;
+      const signedIn = authAvailable ? Boolean(window.firebase.auth().currentUser) : true;
+      if (!signedIn) {
+        console.info('Firebase mirror skipped: no authenticated user (reads likely restricted by rules).');
+      } else {
+        const bookingsSnap = await window.__rally_db.collection('bookings').get();
+        const bookings = bookingsSnap.docs.map(d => d.data());
+        localStorage.setItem('rally_point_bookings', JSON.stringify(bookings || []));
 
-      const usersSnap = await window.__rally_db.collection('users').get();
-      const users = usersSnap.docs.map(d => d.data());
-      localStorage.setItem('rally_users', JSON.stringify(users || []));
+        const usersSnap = await window.__rally_db.collection('users').get();
+        const users = usersSnap.docs.map(d => d.data());
+        localStorage.setItem('rally_users', JSON.stringify(users || []));
 
-      const waitlistsSnap = await window.__rally_db.collection('waitlists').get();
-      const waitlists = waitlistsSnap.docs.map(d => d.data());
-      localStorage.setItem('rally_point_waitlists', JSON.stringify(waitlists || []));
+        const waitlistsSnap = await window.__rally_db.collection('waitlists').get();
+        const waitlists = waitlistsSnap.docs.map(d => d.data());
+        localStorage.setItem('rally_point_waitlists', JSON.stringify(waitlists || []));
 
-      console.info('Firebase sync: loaded', bookings.length || 0, 'bookings,', users.length || 0, 'users');
+        console.info('Firebase sync: loaded', bookings.length || 0, 'bookings,', users.length || 0, 'users');
+      }
     } catch (err) {
       console.warn('Firebase: failed to mirror collections to localStorage', err);
     }
