@@ -33,12 +33,11 @@ module.exports = async (req, res) => {
   }
 
   let users = [];
-  try {
-    const body = req.body;
-    users = body && Array.isArray(body.users) ? body.users : [];
-  } catch (e) {
-    return res.status(400).json({ error: 'Invalid JSON body' });
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch (e) { return res.status(400).json({ error: 'Invalid JSON body' }); }
   }
+  users = body && Array.isArray(body.users) ? body.users : [];
 
   let adminSdk;
   try {
