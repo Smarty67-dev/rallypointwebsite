@@ -32,6 +32,26 @@ module.exports = async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  // Safe debug helper: call with ?debug=1 and a correct Authorization header
+  // Returns only metadata (no secrets or header values).
+  try {
+    const url = require('url');
+    const q = url.parse(req.url || '', true).query || {};
+    if (q.debug === '1') {
+      const headerToken = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+      const bodyType = typeof req.body;
+      const bodyLength = req.body && (typeof req.body === 'string' ? req.body.length : (req.body.length || null));
+      return res.status(200).json({
+        debug: true,
+        migrateSecretSet: !!expected,
+        headerProvided: !!auth,
+        headerTokenLength: headerToken ? headerToken.length : null,
+        bodyType,
+        bodyLength
+      });
+    }
+  } catch (e) { /* no-op debug failure */ }
+
   let users = [];
   let body = req.body;
   if (typeof body === 'string') {
