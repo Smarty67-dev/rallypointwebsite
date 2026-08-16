@@ -609,7 +609,31 @@ function switchAuthTab(tab) {
 function handleLogin() {
   const email = elements.loginEmail.value.trim().toLowerCase();
   const pass = elements.loginPass.value;
+  // If Firebase is configured, use Firebase Auth
+  if (hasFirestoreBackend() && window.firebase && window.firebase.auth) {
+    window.firebase.auth().signInWithEmailAndPassword(email, pass)
+      .then(async (cred) => {
+        try {
+          const uid = cred.user.uid;
+          const doc = await window.__rally_db.collection('users').doc(uid).get();
+          const profile = doc.exists ? doc.data() : { name: cred.user.displayName || '', email: cred.user.email, phone: '' };
+          profile.uid = uid;
+          closeAuthModal();
+          setCurrentUserSession(profile);
+          showToast(`Welcome back, ${profile.name || profile.email}!`, 'success');
+          elements.loginForm.reset();
+        } catch (e) {
+          showToast('Login succeeded but failed to load profile.', 'warning');
+        }
+      })
+      .catch((err) => {
+        console.warn('Firebase login error', err);
+        showToast('Invalid email or password.', 'error');
+      });
+    return;
+  }
 
+  // Local-storage fallback
   const users = getUsersFromStorage();
   const user = users.find(u => u.email === email && u.password === pass);
 
@@ -636,6 +660,32 @@ function handleSignup() {
 
   if (!validateEmail(email)) {
     showToast("Please enter a valid email address.", "error");
+    return;
+  }
+
+  // If Firebase is available, create Firebase Auth user and profile
+  if (hasFirestoreBackend() && window.firebase && window.firebase.auth) {
+    window.firebase.auth().createUserWithEmailAndPassword(email, pass)
+      .then(async (cred) => {
+        try {
+          const uid = cred.user.uid;
+          const profile = { name, email, phone, uid };
+          await window.__rally_db.collection('users').doc(uid).set(profile);
+          // Optionally set displayName on Firebase user
+          try { cred.user.updateProfile({ displayName: name }); } catch (e) {}
+          closeAuthModal();
+          setCurrentUserSession(profile);
+          showToast(`Account created! Welcome to RallyPoint, ${name}.`, 'success');
+          elements.signupForm.reset();
+        } catch (e) {
+          console.error('Failed to save profile', e);
+          showToast('Account created but failed to save profile.', 'warning');
+        }
+      })
+      .catch((err) => {
+        console.warn('Firebase signup error', err);
+        showToast('Could not create account: ' + (err.message || err.code), 'error');
+      });
     return;
   }
 
@@ -738,8 +788,15 @@ function updateAuthUI() {
 }
 
 function handleLogout() {
+  // If Firebase Auth is enabled, sign out there too
+  if (hasFirestoreBackend() && window.firebase && window.firebase.auth) {
+    try {
+      window.firebase.auth().signOut().catch(() => {});
+    } catch (e) {}
+  }
+
   state.currentUser = null;
-  localStorage.removeItem('rally_current_user');
+  try { localStorage.removeItem('rally_current_user'); } catch (e) {}
   updateAuthUI();
   showToast("Logged out successfully.", "info");
 
@@ -1640,6 +1697,7 @@ async function initBookingBackend() {
   try {
     // Load Firebase compat SDKs so code runs in browsers without bundlers
     await loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js');
+    await loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js');
     await loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js');
 
     if (!window.firebase || !window.firebase.initializeApp) {
@@ -1649,6 +1707,30 @@ async function initBookingBackend() {
 
     try { window.firebase.initializeApp(cfg); } catch (e) { /* already initialized might throw */ }
     window.__rally_db = window.firebase.firestore();
+
+    // Initialize Auth listener to keep state in sync across tabs/devices
+    try {
+      if (window.firebase && window.firebase.auth) {
+        window.firebase.auth().onAuthStateChanged(async (fbUser) => {
+          if (fbUser) {
+            // load profile from Firestore if available
+            try {
+              const doc = await window.__rally_db.collection('users').doc(fbUser.uid).get();
+              const profile = doc.exists ? doc.data() : { name: fbUser.displayName || '', email: fbUser.email, phone: '' };
+              profile.uid = fbUser.uid;
+              setCurrentUserSession(profile);
+            } catch (e) {
+              setCurrentUserSession({ name: fbUser.displayName || '', email: fbUser.email, phone: '', uid: fbUser.uid });
+            }
+          } else {
+            // signed out
+            try { localStorage.removeItem('rally_current_user'); } catch (e) {}
+            state.currentUser = null;
+            updateAuthUI();
+          }
+        });
+      }
+    } catch (e) { console.warn('Firebase auth listener failed', e); }
 
     // Pull remote collections into localStorage so the app can continue using existing local helpers
     try {
