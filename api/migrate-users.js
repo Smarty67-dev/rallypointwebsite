@@ -16,7 +16,31 @@ function initAdmin() {
   const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!sa) throw new Error('FIREBASE_SERVICE_ACCOUNT not set');
   let creds;
-  try { creds = JSON.parse(sa); } catch (e) { throw new Error('Invalid FIREBASE_SERVICE_ACCOUNT JSON'); }
+  // Try several common encodings/variants so env var paste quirks don't block initialization
+  const tryParse = (s) => {
+    try { return JSON.parse(s); } catch (e) { return null; }
+  };
+
+  creds = tryParse(sa);
+  if (!creds) {
+    // 1) Sometimes newlines are escaped as literal \n when pasted into web UI
+    creds = tryParse(sa.replace(/\\n/g, '\n'));
+  }
+  if (!creds) {
+    // 2) Sometimes people add surrounding single quotes
+    if (sa.startsWith("'") && sa.endsWith("'")) creds = tryParse(sa.slice(1, -1));
+  }
+  if (!creds && process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
+    // 3) Support base64-encoded service account in FIREBASE_SERVICE_ACCOUNT_B64
+    try {
+      const raw = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8');
+      creds = tryParse(raw) || tryParse(raw.replace(/\\n/g, '\n'));
+    } catch (e) { creds = null; }
+  }
+
+  if (!creds) {
+    throw new Error('Invalid FIREBASE_SERVICE_ACCOUNT JSON — ensure you pasted the exact service account JSON (no extra quotes). As an alternative, set FIREBASE_SERVICE_ACCOUNT_B64 to the base64 of the JSON.');
+  }
   admin.initializeApp({ credential: admin.credential.cert(creds) });
   global.__admin_inited = true;
   return admin;
