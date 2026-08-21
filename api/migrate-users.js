@@ -14,14 +14,17 @@ const admin = require('firebase-admin');
 function initAdmin() {
   if (global.__admin_inited) return admin;
 
-  let sa = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!sa && process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
+  let sa = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
+  if (sa) {
     try {
       sa = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8');
     } catch (e) {
       throw new Error('Invalid FIREBASE_SERVICE_ACCOUNT_B64 value');
     }
   }
+
+  // Prefer the base64 form, but retain support for the raw JSON variable.
+  if (!sa) sa = process.env.FIREBASE_SERVICE_ACCOUNT;
 
   if (!sa) throw new Error('FIREBASE_SERVICE_ACCOUNT not set');
 

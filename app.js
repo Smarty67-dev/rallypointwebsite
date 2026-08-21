@@ -634,8 +634,6 @@ function handleLogin() {
         if (localUser) {
           closeAuthModal();
           setCurrentUserSession(localUser);
-          // Show a neutral info toast instead of a warning
-          showToast('Signed in (local account). Remote sync not configured.', 'info');
           elements.loginForm.reset();
           return;
         }
@@ -1751,10 +1749,9 @@ async function initBookingBackend() {
               setCurrentUserSession({ name: fbUser.displayName || '', email: fbUser.email, phone: '', uid: fbUser.uid });
             }
           } else {
-            // signed out
-            try { localStorage.removeItem('rally_current_user'); } catch (e) {}
-            state.currentUser = null;
-            updateAuthUI();
+            // Firebase may report signed out briefly while restoring auth on reload.
+            // Keep the persisted local session; explicit logout clears it.
+            if (!state.currentUser) updateAuthUI();
           }
         });
       }
