@@ -238,14 +238,14 @@ header.scrolled .nav-container {
   font-family: var(--font-sans);
   font-weight: 800;
   font-size: 1.6rem;
-  color: var(--primary-deep);
+  color: var(--text-light);
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
 .nav-logo span {
-  color: var(--primary-light);
+  color: var(--accent-volt);
 }
 
 header.scrolled .nav-logo span {
@@ -286,10 +286,14 @@ header.scrolled .nav-logo span {
 
 .nav-link {
   font-weight: 600;
-  color: var(--primary-deep);
+  color: rgba(255, 255, 255, 0.92);
   font-size: 0.95rem;
   position: relative;
   padding: 0.5rem 0;
+}
+
+.nav-link:hover {
+  color: var(--accent-volt);
 }
 
 .nav-link::after {
@@ -323,7 +327,7 @@ header.scrolled .nav-logo span {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--primary-deep);
+  color: var(--text-light);
   font-size: 1.5rem;
   min-width: 44px;
   min-height: 44px;

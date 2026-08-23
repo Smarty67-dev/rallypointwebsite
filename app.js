@@ -148,6 +148,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initBookingForm();
   initLookup();
   initAdminRoute();
+  initInactivityTracker();
 
   await initBookingBackend();
 
@@ -169,6 +170,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Check active session (loads bookings if already logged in)
   checkSession();
+  maintainWaitlistOffers();
+  setInterval(maintainWaitlistOffers, 15000);
   // Ensure bookings placeholder is accurate after session restore
   if (!state.currentUser) {
     renderBookingsPlaceholder();
@@ -246,6 +249,7 @@ function initDbModalAndTelemetry() {
 // Telemetry Logger Engine
 let telemetryExecutionCount = 0;
 let telemetryPromotionCount = 0;
+const WAITLIST_OFFER_WINDOW_MS = 3 * 60 * 1000;
 
 function logEdgeTelemetry(message, type = 'info') {
   // telemetry logging removed
@@ -253,6 +257,76 @@ function logEdgeTelemetry(message, type = 'info') {
 
 function updateTelemetryMetrics(latencyMs = 24, isPromotion = false) {
   // telemetry metrics removed
+}
+
+function isWaitlistOfferActive(entry) {
+  if (!entry || entry.status !== 'OFFERED' || !entry.offerExpiresAt) return false;
+  return new Date(entry.offerExpiresAt).getTime() > Date.now();
+}
+
+function getOfferTimeLeftLabel(entry) {
+  if (!entry || !entry.offerExpiresAt) return 'Offer pending';
+  const ms = new Date(entry.offerExpiresAt).getTime() - Date.now();
+  if (ms <= 0) return 'Offer expired';
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  return `${mins}m ${String(secs).padStart(2, '0')}s left`;
+}
+
+function getSessionQueue(waitlists, dateKey, session) {
+  return waitlists
+    .filter(w => w.date === dateKey && w.session === session)
+    .sort((a, b) => (a.position || 9999) - (b.position || 9999) || new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+}
+
+function reindexSessionWaitlist(waitlists, dateKey, session) {
+  const waiting = waitlists
+    .filter(w => w.date === dateKey && w.session === session && w.status === 'WAITING')
+    .sort((a, b) => (a.position || 9999) - (b.position || 9999) || new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+  waiting.forEach((w, idx) => {
+    w.position = idx + 1;
+  });
+}
+
+function getSessionBookedCount(bookings, dateKey, session) {
+  return bookings.filter(b => b.date === dateKey && b.session === session).length;
+}
+
+function maintainWaitlistOffers() {
+  const waitlists = getWaitlistsFromStorage();
+  const bookings = getBookingsFromStorage();
+  const now = Date.now();
+  let changed = false;
+
+  waitlists.forEach((entry) => {
+    if (entry.status === 'OFFERED' && entry.offerExpiresAt && new Date(entry.offerExpiresAt).getTime() <= now) {
+      entry.status = 'EXPIRED';
+      entry.offerExpiredAt = new Date().toISOString();
+      changed = true;
+    }
+  });
+
+  const sessions = new Set(waitlists.map(w => `${w.date}|${w.session}`));
+  sessions.forEach((sessionKey) => {
+    const [dateKey, session] = sessionKey.split('|');
+    const slotOpen = getSessionBookedCount(bookings, dateKey, session) < state.maxSpots;
+    if (!slotOpen) return;
+
+    const hasActiveOffer = waitlists.some(w => w.date === dateKey && w.session === session && isWaitlistOfferActive(w));
+    if (hasActiveOffer) return;
+
+    const topWaiting = getSessionQueue(waitlists, dateKey, session).find(w => w.status === 'WAITING');
+    if (!topWaiting) return;
+
+    topWaiting.status = 'OFFERED';
+    topWaiting.offeredAt = new Date().toISOString();
+    topWaiting.offerExpiresAt = new Date(Date.now() + WAITLIST_OFFER_WINDOW_MS).toISOString();
+    changed = true;
+    reindexSessionWaitlist(waitlists, dateKey, session);
+  });
+
+  if (changed) saveWaitlistsToStorage(waitlists);
 }
 
 // --- NAVIGATION ---
@@ -688,12 +762,29 @@ function handleSignup() {
           elements.signupForm.reset();
         } catch (e) {
           console.error('Failed to save profile', e);
-          showToast('Account created but failed to save profile.', 'warning');
+          // Keep signup usable even if Firestore profile write is blocked.
+          closeAuthModal();
+          setCurrentUserSession({
+            name,
+            email,
+            phone,
+            uid: cred.user.uid
+          });
+          showToast(`Account created! Welcome to RallyPoint, ${name}.`, 'success');
+          elements.signupForm.reset();
         }
       })
       .catch((err) => {
         console.warn('Firebase signup error', err);
-        showToast('Could not create account: ' + (err.message || err.code), 'error');
+        if (err && err.code === 'auth/weak-password') {
+          showToast('Password must be at least 6 characters. Please choose a stronger password.', 'error');
+          return;
+        }
+        if (err && err.code === 'auth/email-already-in-use') {
+          showToast('An account with this email already exists. Try logging in instead.', 'error');
+          return;
+        }
+        showToast('Could not create account. Please check your details and try again.', 'error');
       });
     return;
   }
@@ -719,6 +810,7 @@ function setCurrentUserSession(user) {
   localStorage.setItem('rally_current_user', JSON.stringify(user));
   updateAuthUI();
   if (state.selectedDate) selectDate(state.selectedDate);
+  resetInactivityTimer();
 }
 
 function checkSession() {
@@ -787,7 +879,7 @@ function updateAuthUI() {
       <button class="btn btn-volt btn-nav-auth" id="btn-nav-login">Login / Signup</button>
     `;
     document.getElementById('btn-nav-login').addEventListener('click', () => openAuthModal('login'));
-    renderBookingsPlaceholder();
+    refreshMyBookingsView();
     }
   } catch (err) {
     console.error('updateAuthUI error', err);
@@ -796,7 +888,7 @@ function updateAuthUI() {
   try { renderAdminRoute(); } catch (e) { console.error('renderAdminRoute error', e); }
 }
 
-function handleLogout() {
+function handleLogout(showDefaultToast) {
   // If Firebase Auth is enabled, sign out there too
   if (hasFirestoreBackend() && window.firebase && window.firebase.auth) {
     try {
@@ -807,7 +899,9 @@ function handleLogout() {
   state.currentUser = null;
   try { localStorage.removeItem('rally_current_user'); } catch (e) {}
   updateAuthUI();
-  showToast("Logged out successfully.", "info");
+  if (showDefaultToast !== false) {
+    showToast("Logged out successfully.", "info");
+  }
 
   if (state.selectedDate) {
     selectDate(state.selectedDate);
@@ -826,12 +920,27 @@ function getInitials(name) {
 // Ensure a lightweight refresh helper exists for the My Reservations view
 function refreshMyBookingsView() {
   try {
-    // If there is a dedicated render for the user's bookings, call it; otherwise use placeholder
-    if (typeof renderMyBookings === 'function') {
-      renderMyBookings();
-    } else {
+    if (!elements.lookupEmail || !elements.btnLookupSearch) {
       renderBookingsPlaceholder();
+      return;
     }
+
+    const signedInEmail = state.currentUser && state.currentUser.email
+      ? state.currentUser.email.trim().toLowerCase()
+      : '';
+
+    if (!signedInEmail) {
+      elements.lookupEmail.value = '';
+      elements.lookupEmail.disabled = true;
+      elements.btnLookupSearch.disabled = true;
+      renderBookingsPlaceholder();
+      return;
+    }
+
+    elements.lookupEmail.disabled = false;
+    elements.btnLookupSearch.disabled = false;
+    elements.lookupEmail.value = signedInEmail;
+    searchBookings(signedInEmail);
   } catch (e) {
     // swallow errors to avoid breaking auth flow
     console.warn('refreshMyBookingsView error', e);
@@ -976,7 +1085,7 @@ function selectSession(session) {
     elements.btnSubmitBooking.className = 'btn btn-volt';
 
     const noticeText = document.getElementById('booking-notice-text');
-    if (noticeText) noticeText.textContent = "This session is currently full. Submitting this form adds you to the FIFO waitlist. If any player cancels, your spot will be automatically promoted via our serverless edge function!";
+    if (noticeText) noticeText.textContent = "This session is currently full. Submitting this form adds you to the FIFO waitlist. If a slot opens, the first parent in line gets a 30-minute acceptance window.";
   } else {
     elements.flowTitle.textContent = "Reserve Court Seat";
     elements.flowSubtitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--primary-light);"></i> Reserve: <strong>${sessionName}</strong> on <strong>${dateStr}</strong>`;
@@ -1006,6 +1115,8 @@ function updateSessionSlotsCapacity(date) {
 
   const morningWaitlists = waitlists.filter(w => w.date === dateKey && w.session === 'morning' && w.status === 'WAITING').length;
   const eveningWaitlists = waitlists.filter(w => w.date === dateKey && w.session === 'evening' && w.status === 'WAITING').length;
+  const morningOfferPending = waitlists.some(w => w.date === dateKey && w.session === 'morning' && isWaitlistOfferActive(w));
+  const eveningOfferPending = waitlists.some(w => w.date === dateKey && w.session === 'evening' && isWaitlistOfferActive(w));
 
   const morningLeft = Math.max(0, state.maxSpots - morningCount);
   const eveningLeft = Math.max(0, state.maxSpots - eveningCount);
@@ -1013,13 +1124,17 @@ function updateSessionSlotsCapacity(date) {
   // Morning Card Capacity
   elements.slotCardMorning.classList.remove('disabled');
   elements.slotCardMorning.classList.add('waitlist-mode');
-  elements.morningCapacityText.textContent = `Waitlist Open - #${morningWaitlists + 1} in Queue`;
+  elements.morningCapacityText.textContent = morningOfferPending
+    ? `Offer Pending • Queue #${morningWaitlists + 1}`
+    : `Waitlist Open - #${morningWaitlists + 1} in Queue`;
   elements.morningCapacityBar.style.width = '100%';
   elements.morningCapacityBar.className = 'capacity-progress waitlist';
 
   elements.slotCardEvening.classList.remove('disabled');
   elements.slotCardEvening.classList.add('waitlist-mode');
-  elements.eveningCapacityText.textContent = `Waitlist Open - #${eveningWaitlists + 1} in Queue`;
+  elements.eveningCapacityText.textContent = eveningOfferPending
+    ? `Offer Pending • Queue #${eveningWaitlists + 1}`
+    : `Waitlist Open - #${eveningWaitlists + 1} in Queue`;
   elements.eveningCapacityBar.style.width = '100%';
   elements.eveningCapacityBar.className = 'capacity-progress waitlist';
 }
@@ -1033,6 +1148,7 @@ function initBookingForm() {
 }
 
 async function submitBooking() {
+  maintainWaitlistOffers();
   if (!state.currentUser) {
     showToast("You must log in to submit a booking or join the waitlist.", "error");
     return;
@@ -1094,7 +1210,7 @@ async function submitBooking() {
     logEdgeTelemetry(`Waitlist Entry Created: ${name} (${email}) queued at Position #${position} for ${dateKey} ${state.selectedSession}.`, 'info');
     updateTelemetryMetrics(12, false);
 
-    showToast(`Added to waitlist! Position #${position} for ${formatBookingSessionProgram(state.selectedSession)}. If a slot opens up, you'll be automatically promoted!`, "success");
+    showToast(`Added to waitlist! Position #${position} for ${formatBookingSessionProgram(state.selectedSession)}. If a slot opens, you'll get a 30-minute acceptance window.`, "success");
 
     elements.bookingForm.style.display = 'none';
     state.selectedSession = null;
@@ -1200,6 +1316,13 @@ async function executeServerlessCancellationHandler(cancelledBooking) {
 
   // Query FIFO Waitlist for top waiting player
   let waitlists = getWaitlistsFromStorage();
+  const existingOffer = waitlists.find(w => w.date === sessionDate && w.session === sessionType && isWaitlistOfferActive(w));
+  if (existingOffer) {
+    logEdgeTelemetry(`[2/5] Existing active offer found for ${existingOffer.email}. Holding queue fairness window.`, 'info');
+    updateTelemetryMetrics(Date.now() - startTime, false);
+    return;
+  }
+
   const activeQueue = waitlists
     .filter(w => w.date === sessionDate && w.session === sessionType && w.status === 'WAITING')
     .sort((a, b) => a.position - b.position || new Date(a.createdAt) - new Date(b.createdAt));
@@ -1213,18 +1336,16 @@ async function executeServerlessCancellationHandler(cancelledBooking) {
     return;
   }
 
-  // Top candidate found!
+  // Top candidate found! Offer a 30-minute acceptance window.
   const topCandidate = activeQueue[0];
   logEdgeTelemetry(`[3/5] Top FIFO Candidate Evaluated: ${topCandidate.name} (${topCandidate.email}) at Queue Position #${topCandidate.position}`, 'warning');
 
-  const newBookingId = `RP-${sessionDate.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-  // Update top candidate status to PROMOTED
+  // Update top candidate status to OFFERED
   const candidateIndex = waitlists.findIndex(w => w.id === topCandidate.id);
   if (candidateIndex !== -1) {
-    waitlists[candidateIndex].status = 'PROMOTED';
-    waitlists[candidateIndex].promotedAt = new Date().toISOString();
-    waitlists[candidateIndex].promotedBookingId = newBookingId;
+    waitlists[candidateIndex].status = 'OFFERED';
+    waitlists[candidateIndex].offeredAt = new Date().toISOString();
+    waitlists[candidateIndex].offerExpiresAt = new Date(Date.now() + WAITLIST_OFFER_WINDOW_MS).toISOString();
   }
 
   // Re-index remaining queue positions
@@ -1237,16 +1358,53 @@ async function executeServerlessCancellationHandler(cancelledBooking) {
 
   saveWaitlistsToStorage(waitlists);
 
-  // Insert newly promoted confirmed booking
+  logEdgeTelemetry(`[4/5] FAIRNESS HOLD: Waitlist #${topCandidate.position} received a 30-minute offer window.`, 'success');
+  logEdgeTelemetry(`[5/5] Offer notification triggered for ${topCandidate.email}. Execution completed in ${Date.now() - startTime}ms. HTTP 200 OK`, 'success');
+
+  updateTelemetryMetrics(Date.now() - startTime, true);
+
+  showToast(`Spot opened! ${topCandidate.name} now has 30 minutes to accept before it moves to the next parent.`, "success");
+}
+
+function acceptWaitlistOffer(waitlistId, email) {
+  maintainWaitlistOffers();
+  const signedInEmail = state.currentUser ? state.currentUser.email.trim().toLowerCase() : '';
+  if (!signedInEmail || signedInEmail !== (email || '').trim().toLowerCase()) {
+    showToast('Only the offered parent account can accept this spot.', 'error');
+    return;
+  }
+
+  const waitlists = getWaitlistsFromStorage();
+  const entry = waitlists.find(w => w.id === waitlistId && w.email === email);
+  if (!entry) {
+    showToast('Offer not found.', 'error');
+    return;
+  }
+
+  if (entry.status !== 'OFFERED' || !isWaitlistOfferActive(entry)) {
+    showToast('This offer has expired. The spot moved to the next parent in line.', 'warning');
+    maintainWaitlistOffers();
+    searchBookings(email);
+    renderAdminRoute();
+    return;
+  }
+
+  const sessionBookedCount = getSessionBookedCount(getBookingsFromStorage(), entry.date, entry.session);
+  if (sessionBookedCount >= state.maxSpots) {
+    showToast('This slot is no longer available.', 'warning');
+    return;
+  }
+
+  const newBookingId = `RP-${entry.date.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
   const promotedBooking = {
     id: newBookingId,
-    name: topCandidate.name,
-    email: topCandidate.email,
-    phone: topCandidate.phone,
-    skill: topCandidate.skill,
-    age: topCandidate.age,
-    date: sessionDate,
-    session: sessionType,
+    name: entry.name,
+    email: entry.email,
+    phone: entry.phone,
+    skill: entry.skill,
+    age: entry.age,
+    date: entry.date,
+    session: entry.session,
     createdAt: new Date().toISOString(),
     promotedFromWaitlist: true
   };
@@ -1255,19 +1413,24 @@ async function executeServerlessCancellationHandler(cancelledBooking) {
   bookings.push(promotedBooking);
   saveBookingsToStorage(bookings);
 
-  logEdgeTelemetry(`[4/5] ATOMIC TRANSITION: Waitlist #${topCandidate.position} -> CONFIRMED (Booking ID: ${newBookingId}). Slot Re-allocated!`, 'success');
+  entry.status = 'PROMOTED';
+  entry.promotedAt = new Date().toISOString();
+  entry.promotedBookingId = newBookingId;
+  saveWaitlistsToStorage(waitlists);
 
-  // Dispatch Email Notification to Promoted Player
   dispatchBookingEmailAlert(promotedBooking).catch(err => console.warn('[Promoted Email]', err));
 
-  logEdgeTelemetry(`[5/5] Automated Email Alert sent to ${topCandidate.email}. Execution completed in ${Date.now() - startTime}ms. HTTP 200 OK`, 'success');
+  showToast(`Offer accepted! Your booking is confirmed (${newBookingId}).`, 'success');
 
-  updateTelemetryMetrics(Date.now() - startTime, true);
-
-  showToast(`🎉 WAITLIST AUTO-PROMOTION: ${topCandidate.name} was automatically promoted from the waitlist to a confirmed spot!`, "success");
+  maintainWaitlistOffers();
+  if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
+  renderCalendar();
+  searchBookings(email);
+  renderAdminRoute();
 }
 
 function cancelWaitlistEntry(waitlistId, email) {
+  maintainWaitlistOffers();
   let waitlists = getWaitlistsFromStorage();
   const entry = waitlists.find(w => w.id === waitlistId);
   if (!entry) return;
@@ -1287,6 +1450,7 @@ function cancelWaitlistEntry(waitlistId, email) {
 
   logEdgeTelemetry(`Waitlist entry ${waitlistId} left queue. Remaining positions re-indexed.`, 'info');
 
+  maintainWaitlistOffers();
   searchBookings(email);
   if (state.selectedDate) updateSessionSlotsCapacity(state.selectedDate);
   renderCalendar();
@@ -1413,7 +1577,10 @@ function initLookup() {
 }
 
 function searchBookings(email) {
-  const signedInEmail = state.currentUser ? state.currentUser.email.trim().toLowerCase() : '';
+  maintainWaitlistOffers();
+  const signedInEmail = state.currentUser && state.currentUser.email
+    ? state.currentUser.email.trim().toLowerCase()
+    : '';
   const lookupEmail = (email || '').trim().toLowerCase();
 
   if (!signedInEmail) {
@@ -1443,7 +1610,7 @@ function searchBookings(email) {
   }
 
   const bookings = getBookingsFromStorage().filter(b => b.email === resolvedEmail);
-  const waitlists = getWaitlistsFromStorage().filter(w => w.email === resolvedEmail);
+  const waitlists = getWaitlistsFromStorage().filter(w => w.email === resolvedEmail && ['WAITING', 'OFFERED'].includes(w.status));
 
   if (bookings.length === 0 && waitlists.length === 0) {
     elements.bookingsOutputContainer.innerHTML = `
@@ -1504,7 +1671,7 @@ function searchBookings(email) {
       <div class="ticket-card" style="margin-bottom: 1.5rem; border-left: 4px solid #ffaa00; background: rgba(255, 170, 0, 0.05);">
         <div class="ticket-header">
           <div>
-            <span class="tag-waitlist-badge">WAITLIST POSITION #${w.position}</span>
+            <span class="tag-waitlist-badge">${w.status === 'OFFERED' ? 'SPOT OFFERED' : `WAITLIST POSITION #${w.position}`}</span>
             <h4 class="ticket-session">${formatBookingSessionProgram(w.session)}</h4>
           </div>
           <span class="ticket-date">${formatBookingDateLabel(w.date)}</span>
@@ -1517,7 +1684,7 @@ function searchBookings(email) {
             </div>
             <div>
               <span class="t-label">Queue Position</span>
-              <strong class="t-val" style="color: #ffaa00;">Position #${w.position} in line</strong>
+              <strong class="t-val" style="color: #ffaa00;">${w.status === 'OFFERED' ? 'You are up next' : `Position #${w.position} in line`}</strong>
             </div>
             <div>
               <span class="t-label">Skill Level</span>
@@ -1525,10 +1692,11 @@ function searchBookings(email) {
             </div>
             <div>
               <span class="t-label">Status</span>
-              <strong class="t-val">${w.status}</strong>
+              <strong class="t-val">${w.status}${w.status === 'OFFERED' ? ` • ${getOfferTimeLeftLabel(w)}` : ''}</strong>
             </div>
           </div>
-          <div class="ticket-actions" style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+          <div class="ticket-actions" style="margin-top: 1rem; display: flex; justify-content: flex-end; gap: 0.6rem;">
+            ${w.status === 'OFFERED' ? `<button class="btn btn-sm btn-volt" onclick="acceptWaitlistOffer('${w.id}', '${w.email}')"><i class="fa-solid fa-circle-check"></i> Accept Spot</button>` : ''}
             <button class="btn btn-sm btn-outline" onclick="cancelWaitlistEntry('${w.id}', '${w.email}')" style="color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.2);"><i class="fa-solid fa-xmark"></i> Leave Waitlist</button>
           </div>
         </div>
@@ -1542,6 +1710,7 @@ function searchBookings(email) {
 // --- ADMIN ROSTER & WAITLIST QUEUE DISPLAY ---
 function renderAdminRoster(bookings = getBookingsFromStorage().filter(isActiveRosterBooking)) {
   if (!elements.adminRosterList) return;
+  maintainWaitlistOffers();
 
   const waitlists = getWaitlistsFromStorage();
 
@@ -1567,7 +1736,7 @@ function renderAdminRoster(bookings = getBookingsFromStorage().filter(isActiveRo
     const spotsLeft = Math.max(state.maxSpots - sessionBookings.length, 0);
 
     const sessionWaitlists = waitlists
-      .filter(w => w.date === date && w.session === session && w.status === 'WAITING')
+      .filter(w => w.date === date && w.session === session && (w.status === 'WAITING' || w.status === 'OFFERED'))
       .sort((a, b) => a.position - b.position);
 
     return `
@@ -1616,8 +1785,8 @@ function renderAdminRoster(bookings = getBookingsFromStorage().filter(isActiveRo
             <div style="display: flex; flex-direction: column; gap: 0.4rem;">
               ${sessionWaitlists.map(w => `
                 <div style="display: flex; justify-content: space-between; font-size: 0.82rem; color: rgba(255,255,255,0.85); background: rgba(0,0,0,0.2); padding: 0.4rem 0.8rem; border-radius: 4px;">
-                  <span><strong>Position #${w.position}:</strong> ${escapeHTML(w.name)} (${escapeHTML(w.email)})</span>
-                  <span style="color: #ffaa00;">${w.skill} • ${w.age}</span>
+                  <span><strong>${w.status === 'OFFERED' ? 'OFFERED:' : `Position #${w.position}:`}</strong> ${escapeHTML(w.name)} (${escapeHTML(w.email)})</span>
+                  <span style="color: #ffaa00;">${w.skill} • ${w.age}${w.status === 'OFFERED' ? ` • ${getOfferTimeLeftLabel(w)}` : ''}</span>
                 </div>
               `).join('')}
             </div>
@@ -1819,8 +1988,40 @@ function formatBookingSessionTime(s) { return s === 'morning' ? '7:00 AM - 8:30 
 function formatBookingDateLabel(d) { return d; }
 function renderBookingsPlaceholder() {
   if (elements.bookingsOutputContainer) {
-    elements.bookingsOutputContainer.innerHTML = '<p>Sign in to view reservations.</p>';
+    const signedIn = Boolean(state.currentUser && state.currentUser.email);
+    elements.bookingsOutputContainer.innerHTML = signedIn
+      ? '<p>Search your email to view reservations.</p>'
+      : '<p>Sign in to view reservations.</p>';
   }
 }
 function ensureDirectorAccounts() {}
 function seedDatabase() {}
+
+// --- INACTIVITY AUTO-LOGOUT ---
+let inactivityTimer = null;
+const INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes of inactivity
+
+function resetInactivityTimer() {
+  if (inactivityTimer) {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  }
+  if (state.currentUser) {
+    inactivityTimer = setTimeout(autoLogoutUser, INACTIVITY_TIMEOUT);
+  }
+}
+
+function autoLogoutUser() {
+  if (state.currentUser) {
+    handleLogout(false);
+    showToast("You have been logged out due to inactivity.", "warning");
+  }
+}
+
+function initInactivityTracker() {
+  const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+  activityEvents.forEach(eventName => {
+    document.addEventListener(eventName, resetInactivityTimer, { passive: true });
+  });
+  resetInactivityTimer();
+}
